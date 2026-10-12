@@ -1,0 +1,34 @@
+{
+  "name": "DashTask · SAFe Dashboard",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+
+  "postCreateCommand": "npm install",
+
+  "postStartCommand": "bash .devcontainer/start.sh",
+
+  "forwardPorts": [5173, 4100],
+  "portsAttributes": {
+    "5173": {
+      "label": "DashTask · Web",
+      "onAutoForward": "openPreview",
+      "visibility": "public"
+    },
+    "4100": {
+      "label": "DashTask · API",
+      "onAutoForward": "silent"
+    }
+  },
+  "otherPortsAttributes": { "onAutoForward": "ignore" },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.live-server"
+      ]
+    }
+  },
+
+  "hostRequirements": { "cpus": 2 }
+}

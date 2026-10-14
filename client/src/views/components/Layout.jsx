@@ -6,6 +6,7 @@ import { Avatar, RoleBadge } from './UI.jsx';
 const NAV = [
   { to: '/', label: 'Dashboard', icon: '📊', end: true, roles: '*' },
   { to: '/backlog', label: 'Backlog (Proyectos › Épicas)', icon: '🧱', roles: '*' },
+  { to: '/priority', label: 'Priorización (WSJF)', icon: '🎯', roles: '*' },
   { to: '/sprints', label: 'Sprints', icon: '🗓️', roles: '*' },
   { to: '/calendar', label: 'Calendario', icon: '📅', roles: '*' },
   { to: '/timeline', label: 'Timeline (Gantt)', icon: '📈', roles: '*' },

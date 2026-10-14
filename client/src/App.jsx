@@ -9,6 +9,7 @@ import KanbanView from './views/KanbanView.jsx';
 import CeremoniesView from './views/CeremoniesView.jsx';
 import PeopleView from './views/PeopleView.jsx';
 import BacklogView from './views/BacklogView.jsx';
+import PriorityView from './views/PriorityView.jsx';
 import TaskDetailView from './views/TaskDetailView.jsx';
 import EpicDetailView from './views/EpicDetailView.jsx';
 import ProjectDetailView from './views/ProjectDetailView.jsx';
@@ -41,6 +42,7 @@ export default function App() {
       <Route path="/" element={<Protected><DashboardView /></Protected>} />
       <Route path="/intakes" element={<Protected><IntakesView /></Protected>} />
       <Route path="/backlog" element={<Protected><BacklogView /></Protected>} />
+      <Route path="/priority" element={<Protected><PriorityView /></Protected>} />
       <Route path="/sprints" element={<Protected><SprintsView /></Protected>} />
       <Route path="/calendar" element={<Protected><CalendarView /></Protected>} />
       <Route path="/timeline" element={<Protected><TimelineView /></Protected>} />

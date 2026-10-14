@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../controllers/AuthContext.jsx';
 import { useToast } from '../controllers/ToastContext.jsx';
 import { useApi } from '../controllers/useApi.js';
-import { UserModel, AdminModel, ProjectModel } from '../models/api.js';
+import { UserModel, AdminModel, ProjectModel, SettingsModel, TaskModel } from '../models/api.js';
 import { ROLES } from '../config/roles.js';
 import { Card, Badge, Spinner, Avatar, RoleBadge, Field } from './components/UI.jsx';
 
@@ -39,17 +39,20 @@ export default function AdminView() {
         <button className={`btn ${tab === 'perms' ? 'primary' : ''}`} onClick={() => setTab('perms')}>
           🛡️ Permisos de checklist
         </button>
+        <button className={`btn ${tab === 'wip' ? 'primary' : ''}`} onClick={() => setTab('wip')}>
+          🎚️ Límites WIP
+        </button>
       </div>
 
-      {tab === 'teams' ? (
+      {tab === 'teams' && (
         <TeamsTab
           users={usersRes.data?.users || []}
           teams={teamsRes.data?.teams || []}
           onMutated={refreshAll}
         />
-      ) : (
-        <PermsTab />
       )}
+      {tab === 'perms' && <PermsTab />}
+      {tab === 'wip' && <WipTab />}
     </>
   );
 }
@@ -504,6 +507,106 @@ function PermsTab() {
             </Card>
           );
         })}
+      </div>
+    </>
+  );
+}
+
+/* ============================= LÍMITES WIP ============================= */
+const WIP_LABELS = { in_progress: 'Work in Progress', qa: 'QA', uat: 'Staging Review / UAT' };
+
+function WipTab() {
+  const toast = useToast();
+  const { data, loading, reload } = useApi(() => SettingsModel.get(), []);
+  const { data: boardData, reload: reloadBoard } = useApi(() => TaskModel.board(), []);
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (data) {
+      const lim = data.settings?.wipLimits || {};
+      setForm(Object.fromEntries((data.wipColumns || []).map((c) => [c, lim[c] == null ? '' : String(lim[c])])));
+    }
+  }, [data]);
+
+  if (loading || !form) return <Spinner label="Cargando configuración…" />;
+
+  const board = boardData?.board || [];
+  const byId = Object.fromEntries(board.map((c) => [c.id, c]));
+  const cols = data.wipColumns || [];
+  const set = (c) => (e) => setForm((f) => ({ ...f, [c]: e.target.value }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = {};
+      cols.forEach((c) => {
+        const v = form[c];
+        payload[c] = v === '' ? null : Math.max(0, Math.floor(Number(v)));
+      });
+      await SettingsModel.updateWip(payload);
+      toast.success('Límites WIP guardados.');
+      reload();
+      reloadBoard();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetDefaults = () => {
+    const def = data.wipDefaults || {};
+    setForm(Object.fromEntries(cols.map((c) => [c, def[c] == null ? '' : String(def[c])])));
+  };
+
+  return (
+    <>
+      <Card title="Límites WIP del tablero" hint="Máximo de tarjetas permitidas por columna (Work In Progress).">
+        <p className="muted-2" style={{ fontSize: 12.5, marginBottom: 14 }}>
+          El límite WIP evita empezar más trabajo del que el equipo puede terminar: cuenta la columna completa.
+          Si se alcanza, la app impide mover otra tarea a esa columna y muestra un mensaje explicando el tope.
+          Deja el campo <b>vacío</b> para esa columna quede <b>sin límite</b>.
+        </p>
+      </Card>
+
+      <div className="grid cols-3" style={{ marginTop: 4 }}>
+        {cols.map((c) => {
+          return (
+            <Card key={c} style={{ marginBottom: 16 }}>
+              <div className="row between" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <b>{byId[c]?.title || WIP_LABELS[c] || c}</b>
+                <Badge tone={byId[c]?.overWip ? 'danger' : 'gray'} dot>
+                  {byId[c]?.count ?? '—'} en curso
+                </Badge>
+              </div>
+              <Field label="Límite WIP">
+                <input
+                  type="number"
+                  min="0"
+                  value={form[c]}
+                  placeholder="Sin límite"
+                  onChange={set(c)}
+                />
+              </Field>
+              <div className="muted-2" style={{ fontSize: 11.5, marginTop: 6 }}>
+                {form[c] === ''
+                  ? 'Sin límite: entran todas las tarjetas.'
+                  : `Máximo ${form[c]} tarjeta(s) en esta columna.${byId[c] ? ` Hoy hay ${byId[c].count}.${byId[c].overWip ? ' ¡Por encima!' : ''}` : ''}`}
+              </div>
+              {byId[c]?.overWip && (
+                <div className="badge danger" style={{ marginTop: 8, whiteSpace: 'normal' }}>
+                  ⚠️ La columna supera el límite actual.
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="row" style={{ gap: 10, marginTop: 4 }}>
+        <button className="btn primary" onClick={save} disabled={saving}>{saving ? 'Guardando…' : 'Guardar límites'}</button>
+        <button className="btn ghost" onClick={resetDefaults} disabled={saving}>↺ Restaurar por defecto</button>
       </div>
     </>
   );

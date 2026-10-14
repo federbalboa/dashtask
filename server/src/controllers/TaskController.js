@@ -1,6 +1,8 @@
 import { TaskModel, KANBAN_COLUMNS, nextStage, stageIndex, STAGE_IDS } from '../models/TaskModel.js';
 import { UserModel } from '../models/UserModel.js';
 import { SprintModel } from '../models/SprintModel.js';
+import { ProjectModel } from '../models/ProjectModel.js';
+import { SettingsModel } from '../models/SettingsModel.js';
 import { ChangeModel } from '../models/ChangeModel.js';
 import { BlockModel } from '../models/BlockModel.js';
 import { RescheduleService } from '../services/RescheduleService.js';
@@ -51,6 +53,58 @@ export const TaskController = {
       wipExceeded: board.filter((c) => c.overWip).map((c) => c.id),
     };
     return res.json({ columns: KANBAN_COLUMNS, board, totals });
+  },
+
+  /**
+   * Lista priorizada para Product Management: tareas agrupadas por proyecto
+   * ("tipo"/frente de trabajo) y ordenadas por el orden manual guardado o, en su
+   * defecto, por WSJF descendente (mayor WSJF = antes). Incluye las tareas sin
+   * proyecto en un grupo aparte.
+   */
+  prioritized: (_req, res) => {
+    const tasks = TaskModel.all();
+    const byWsjf = (a, b) =>
+      (Number(b.wsjf) || 0) - (Number(a.wsjf) || 0)
+      || (Number(b.priority === 'Crítica') - Number(a.priority === 'Crítica'))
+      || (Number(a.storyPoints) || 0) - (Number(b.storyPoints) || 0);
+
+    const groups = ProjectModel.all()
+      .map((p) => {
+        const items = tasks.filter((t) => t.projectId === p.id);
+        return {
+          project: {
+            id: p.id, code: p.code, name: p.name, status: p.status,
+            valueStream: p.valueStream, productManager: p.productManager,
+          },
+          tasks: SettingsModel.sortByOrder(items, `project:${p.id}`, (a, b) => (b.wsjf || 0) - (a.wsjf || 0) || (a.storyPoints || 0) - (b.storyPoints || 0)),
+          totals: {
+            tasks: items.length,
+            points: items.reduce((s, t) => s + (Number(t.storyPoints) || 0), 0),
+            avgWsjf: items.filter((t) => t.wsjf != null).length
+              ? +(items.filter((t) => t.wsjf != null).reduce((s, t) => s + t.wsjf, 0) / items.filter((t) => t.wsjf != null).length).toFixed(1)
+              : null,
+          },
+        };
+      })
+      .filter((g) => g.tasks.length);
+
+    const orphanTasks = SettingsModel.sortByOrder(
+      TaskModel.all().filter((t) => !t.projectId),
+      'project:__none__',
+      (a, b) => (b.wsjf || 0) - (a.wsjf || 0) || (a.storyPoints || 0) - (b.storyPoints || 0),
+    );
+
+    return res.json({ groups, orphans: orphanTasks, order: SettingsModel.get().taskOrder });
+  },
+
+  /** Guarda el orden manual de un listado (por scope) tras un drag & drop. */
+  reorder: (req, res) => {
+    const { scope, orderedIds } = req.body || {};
+    if (!scope || !Array.isArray(orderedIds)) {
+      return res.status(400).json({ error: 'Faltan "scope" y "orderedIds" (arreglo de IDs).' });
+    }
+    const order = SettingsModel.setOrder(scope, orderedIds);
+    return res.json({ scope, order: order[scope] || [] });
   },
 
   create: (req, res) => {
@@ -217,10 +271,18 @@ export const TaskController = {
     }
 
     const column = KANBAN_COLUMNS.find((c) => c.id === status);
-    if (column.wip != null && from !== status) {
-      const count = TaskModel.findByStatus(status).length;
-      if (count >= column.wip) {
-        return res.status(409).json({ error: `WIP limit alcanzado en "${column.title}".` });
+    if (from !== status) {
+      const wip = TaskModel.wipFor(status);
+      if (wip != null) {
+        const count = TaskModel.findByStatus(status).length;
+        if (count >= wip) {
+          return res.status(409).json({
+            error: `La columna "${column.title}" ya tiene ${count} tarea(s) y su límite WIP es ${wip}. `
+              + 'No es un error tuyo: es el tope del "trabajo en curso" (WIP) que protege el flujo. '
+              + 'Termina, mueve o libera alguna de las tareas que ya están en esa columna para poder agregar otra.',
+            wip: { column: status, title: column.title, count, limit: wip },
+          });
+        }
       }
     }
 

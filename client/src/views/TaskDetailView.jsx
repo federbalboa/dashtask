@@ -3,10 +3,10 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../controllers/useApi.js';
 import { useToast } from '../controllers/ToastContext.jsx';
 import { useAuth } from '../controllers/AuthContext.jsx';
-import { TaskModel, SprintModel, BlockModel } from '../models/api.js';
+import { TaskModel, SprintModel, BlockModel, ChangeModel } from '../models/api.js';
 import { TASK_STAGES, stageMeta, stagesForStatus, nextStageId, STAGE_IDS } from '../config/taskFlow.js';
 import { getRole } from '../config/roles.js';
-import { changeStatusMeta, reasonCodeMeta } from '../config/reschedule.js';
+import { changeStatusMeta, reasonCodeMeta, canDecideChange } from '../config/reschedule.js';
 import { Card, Badge, StatusBadge, ClassBadge, Bar, Empty, Spinner, RoleBadge, Field } from './components/UI.jsx';
 import RescheduleModal from './components/RescheduleModal.jsx';
 import TaskEditModal from './components/TaskEditModal.jsx';
@@ -57,6 +57,7 @@ export default function TaskDetailView() {
   const currentComplete = currentItems.length > 0 && currentDone === currentItems.length;
 
   const myRole = user?.role;
+  const canDecideChanges = canDecideChange(myRole);
 
   const toggleItem = async (item) => {
     setBusy(item.key);
@@ -124,6 +125,19 @@ export default function TaskDetailView() {
     try {
       await BlockModel.decide(block.id, { approve, note: blockNote[block.id] || '' });
       toast.success(approve ? 'Bloqueo autorizado: la tarea pasa a Bloqueado.' : 'Bloqueo rechazado: la tarea continúa.');
+      reload();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const decideChange = async (change, approve, note = '') => {
+    setBusy(change.id);
+    try {
+      await ChangeModel.decide(change.id, { approve, note });
+      toast.success(approve ? 'Cambio autorizado: la fecha de entrega se actualizó.' : 'Cambio mantenido como estaba.');
       reload();
     } catch (e) {
       toast.error(e.message);
@@ -201,10 +215,6 @@ export default function TaskDetailView() {
             onClose={() => setRescheduleOpen(false)}
             onChanged={reload}
           />
-        )}
-
-        {editOpen && (
-          <TaskEditModal ctx={data} onClose={() => setEditOpen(false)} onSaved={reload} />
         )}
 
         {/* Stepper de etapas */}
@@ -374,7 +384,9 @@ export default function TaskDetailView() {
           {/* Cambios de fecha de entrega (motivo trazable) */}
           <Card
             title={`Cambios de entrega (${data.changes?.length || 0})`}
-            hint="Toda modificación de la fecha de entrega queda identificada"
+            hint={canDecideChanges
+              ? 'Las solicitudes pendientes se autorizan aquí mismo'
+              : 'Toda modificación de la fecha de entrega queda identificada'}
             actions={task.dueDate ? (
               <button className="btn sm primary" onClick={() => setRescheduleOpen(true)}>✎ Reprogramar</button>
             ) : null}
@@ -382,7 +394,12 @@ export default function TaskDetailView() {
             {!data.changes || data.changes.length === 0 ? (
               <Empty>Sin cambios de entrega registrados. Usa “✎ Reprogramar” para mover la fecha con su motivo.</Empty>
             ) : (
-              <ChangeLog changes={data.changes} />
+              <ChangeLog
+                changes={data.changes}
+                canDecide={canDecideChanges}
+                busyId={busy}
+                onDecide={decideChange}
+              />
             )}
           </Card>
 
@@ -482,6 +499,10 @@ export default function TaskDetailView() {
           </Card>
         </div>
       </div>
+
+      {editOpen && (
+        <TaskEditModal ctx={data} onClose={() => setEditOpen(false)} onSaved={reload} />
+      )}
     </>
   );
 }

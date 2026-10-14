@@ -1,15 +1,70 @@
-﻿import { useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../controllers/useApi.js';
 import { useToast } from '../controllers/ToastContext.jsx';
-import { ProjectModel, TaskModel } from '../models/api.js';
+import { useAuth } from '../controllers/AuthContext.jsx';
+import { ProjectModel, TaskModel, SettingsModel } from '../models/api.js';
 import { Card, Badge, Bar, Empty, Spinner } from './components/UI.jsx';
 import TaskLine from './components/TaskLine.jsx';
 import RescheduleModal from './components/RescheduleModal.jsx';
 
+const REORDER_ROLES = ['product_manager', 'product_owner', 'lpm', 'rte', 'admin', 'epic_owner', 'business_owner'];
+
 export default function BacklogView() {
+  const { user } = useAuth();
   const toast = useToast();
   const { data, loading, error, reload } = useApi(() => ProjectModel.tree(), []);
+  const { data: settingsData } = useApi(() => SettingsModel.get(), []);
+  const [drag, setDrag] = useState(null);
+  const [over, setOver] = useState(null);
+  const [order, setOrder] = useState({});
+
+  useEffect(() => {
+    if (settingsData?.settings?.taskOrder) setOrder(settingsData.settings.taskOrder);
+  }, [settingsData]);
+
+  const canReorder = REORDER_ROLES.includes(user?.role);
+
+  const sortTasks = (scope, tasks = []) => {
+    const ids = order[scope] || [];
+    if (!ids.length) return tasks;
+    const idx = new Map(ids.map((id, i) => [id, i]));
+    return [...tasks].sort((a, b) => {
+      const ai = idx.has(a.id) ? idx.get(a.id) : Number.MAX_SAFE_INTEGER;
+      const bi = idx.has(b.id) ? idx.get(b.id) : Number.MAX_SAFE_INTEGER;
+      return ai - bi;
+    });
+  };
+
+  const dropAt = async (scope, tasks, beforeId) => {
+    if (!drag || drag.scope !== scope || drag.id === beforeId) { setDrag(null); setOver(null); return; }
+    const ids = sortTasks(scope, tasks).map((t) => t.id).filter((id) => id !== drag.id);
+    const at = beforeId ? ids.indexOf(beforeId) : -1;
+    ids.splice(at < 0 ? ids.length : at, 0, drag.id);
+    setOrder((o) => ({ ...o, [scope]: ids }));
+    setDrag(null);
+    setOver(null);
+    try {
+      await TaskModel.reorder(scope, ids);
+    } catch (e) {
+      toast.error(e.message);
+      reload();
+    }
+  };
+
+  const dragRow = (scope, tasks) => (t) => (
+    <div
+      key={t.id}
+      className={`bl-drag ${over?.scope === scope && over?.id === t.id ? 'over' : ''} ${drag?.id === t.id ? 'dragging' : ''}`}
+      draggable={canReorder}
+      onDragStart={canReorder ? () => setDrag({ scope, id: t.id }) : undefined}
+      onDragEnd={canReorder ? () => { setDrag(null); setOver(null); } : undefined}
+      onDragOver={canReorder ? (e) => { if (drag?.scope === scope) { e.preventDefault(); setOver({ scope, id: t.id }); } } : undefined}
+      onDrop={canReorder ? (e) => { e.preventDefault(); dropAt(scope, tasks, t.id); } : undefined}
+    >
+      <TaskLine task={t} {...lineProps} />
+    </div>
+  );
   const [openEpics, setOpenEpics] = useState({});
   const [rep, setRep] = useState(null);
 
@@ -43,6 +98,7 @@ export default function BacklogView() {
           Estructura Proyecto → Épica → Tarea. Haz clic en cualquier tarea para abrir su página. Los
           <b> story points</b> (esfuerzo) se editan en línea y la <b>fecha de entrega</b> (cuándo) se
           reprograma siempre identificando el motivo.
+          {canReorder && <span> Arrastra las tareas para ordenarlas dentro de cada épica (se guarda el orden).</span>}
         </p>
       </div>
 
@@ -99,7 +155,7 @@ export default function BacklogView() {
                   </div>
                   {open && (
                     <div className="list" style={{ borderTop: '1px solid var(--border-soft)' }}>
-                      {e.tasks.length === 0 ? <div className="empty">Sin tareas en esta épica.</div> : e.tasks.map((t) => <TaskLine key={t.id} task={t} {...lineProps} />)}
+                      {e.tasks.length === 0 ? <div className="empty">Sin tareas en esta épica.</div> : sortTasks(`epic:${e.id}`, e.tasks).map(dragRow(`epic:${e.id}`, e.tasks))}
                     </div>
                   )}
                 </div>
@@ -116,7 +172,7 @@ export default function BacklogView() {
                   </div>
                 </div>
                 <div className="list" style={{ borderTop: '1px solid var(--border-soft)' }}>
-                  {p.orphanTasks.map((t) => <TaskLine key={t.id} task={t} {...lineProps} />)}
+                  {sortTasks(`orphans:${p.id}`, p.orphanTasks).map(dragRow(`orphans:${p.id}`, p.orphanTasks))}
                 </div>
               </div>
             )}
@@ -126,7 +182,7 @@ export default function BacklogView() {
 
       {unassigned.length > 0 && (
         <Card title="Tareas sin proyecto asignado" hint={`${unassigned.length} tareas`} tight>
-          <div className="list">{unassigned.map((t) => <TaskLine key={t.id} task={t} {...lineProps} />)}</div>
+          <div className="list">{sortTasks('unassigned', unassigned).map(dragRow('unassigned', unassigned))}</div>
         </Card>
       )}
 

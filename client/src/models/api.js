@@ -87,6 +87,8 @@ export const IntakeModel = {
 export const TaskModel = {
   list: (params = '') => request(`/tasks${params}`),
   board: () => request('/tasks/board'),
+  prioritized: () => request('/tasks/prioritized'),
+  reorder: (scope, orderedIds) => request('/tasks/reorder', { method: 'POST', body: { scope, orderedIds } }),
   get: (id) => request(`/tasks/${id}`),
   create: (payload) => request('/tasks', { method: 'POST', body: payload }),
   update: (id, payload) => request(`/tasks/${id}`, { method: 'PATCH', body: payload }),
@@ -168,6 +170,11 @@ export const AdminModel = {
   updateTeam: (id, payload) => request(`/admin/teams/${id}`, { method: 'PATCH', body: payload }),
   deleteTeam: (id) => request(`/admin/teams/${id}`, { method: 'DELETE' }),
   setUserTeam: (userId, teamId) => request(`/admin/users/${userId}/team`, { method: 'PUT', body: { teamId } }),
+};
+
+export const SettingsModel = {
+  get: () => request('/settings'),
+  updateWip: (payload) => request('/settings/wip', { method: 'PUT', body: payload }),
 };
 
 export const ChangeModel = {

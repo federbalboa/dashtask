@@ -5,6 +5,8 @@ const router = Router();
 
 router.get('/', TaskController.list);
 router.get('/board', TaskController.board);
+router.get('/prioritized', TaskController.prioritized);
+router.post('/reorder', TaskController.reorder);
 router.post('/', TaskController.create);
 router.get('/:id', TaskController.get);
 router.patch('/:id', TaskController.update);

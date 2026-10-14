@@ -1,6 +1,7 @@
 import db from './Database.js';
 import { nextId, now } from '../utils/id.js';
 import { buildChecklist, STAGE_IDS, nextStage, stageIndex } from '../config/taskFlow.js';
+import { SettingsModel } from './SettingsModel.js';
 
 /** MODELO: Task (tarjeta del tablero Kanban / backlog) */
 const col = () => db.collection('tasks');
@@ -141,12 +142,26 @@ export const TaskModel = {
 
   board: () => {
     const all = col().all();
-    return KANBAN_COLUMNS.map((c) => ({
-      ...c,
-      count: all.filter((t) => t.status === c.id).length,
-      items: all.filter((t) => t.status === c.id),
-      overWip: c.wip != null && all.filter((t) => t.status === c.id).length > c.wip,
-    }));
+    const wipLimits = SettingsModel.getWipLimits();
+    return KANBAN_COLUMNS.map((c) => {
+      const wip = c.wip == null ? null : (wipLimits[c.id] ?? c.wip);
+      const count = all.filter((t) => t.status === c.id).length;
+      return {
+        ...c,
+        wip,
+        count,
+        items: all.filter((t) => t.status === c.id),
+        overWip: wip != null && count > wip,
+      };
+    });
+  },
+
+  /** Límite WIP efectivo (configurable) de una columna; null = sin límite. */
+  wipFor: (columnId) => {
+    const column = KANBAN_COLUMNS.find((c) => c.id === columnId);
+    if (!column || column.wip == null) return null;
+    const limits = SettingsModel.getWipLimits();
+    return limits[columnId] ?? column.wip;
   },
 };
 

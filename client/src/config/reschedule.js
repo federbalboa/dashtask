@@ -26,6 +26,10 @@ export const REASON_CODES = {
   ],
 };
 
+/** Roles que autorizan un control de cambios (equipo de portafolio + admin). Espejo de ChangeController. */
+export const CHANGE_DECIDE_ROLES = ['lpm', 'business_owner', 'epic_owner', 'rte', 'admin'];
+export const canDecideChange = (role) => CHANGE_DECIDE_ROLES.includes(role);
+
 export const CHANGE_STATUS = {
   pending: { label: 'Por autorizar', icon: '⏳', tone: 'warn' },
   applied: { label: 'Aplicada · incidencia', icon: '⚡', tone: 'ok' },

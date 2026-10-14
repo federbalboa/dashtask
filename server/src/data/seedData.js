@@ -2,7 +2,8 @@ import { DEMO_PASSWORD } from '../config/paths.js';
 import { buildChecklist } from '../config/taskFlow.js';
 
 // v9: equipos gestionables por admin (ecosistemas) + control de cambios de entregas (motivos).
-export const SEED_VERSION = 12;
+// v13: límites WIP configurables (admin) + orden manual de listados (drag & drop).
+export const SEED_VERSION = 13;
 
 const USER = (id, name, email, role, opts = {}) => ({
   id,
@@ -2068,6 +2069,10 @@ export function buildSeed() {
       { id: 'RES-019', projectId: 'PRJ-007', userId: 'USR-034', sprintIds: ['SPR-012', 'SPR-013'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
     ],
     state,
+    settings: [
+      // Config del tablero: límites WIP (los edita el Admin) y orden manual de listados.
+      { id: 'SET-001', wipLimits: { in_progress: 5, qa: 5, uat: 4 }, taskOrder: {}, updatedAt: '' },
+    ],
   };
 }
 

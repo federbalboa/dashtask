@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../controllers/AuthContext.jsx';
+import { useToast } from '../controllers/ToastContext.jsx';
 import { useApi } from '../controllers/useApi.js';
 import { TimelineModel, TaskModel } from '../models/api.js';
 import { Spinner, Empty, Badge, StatRow, Stat, Card } from './components/UI.jsx';
-import GanttChart from './components/Gantt.jsx';
+import GanttChart, { shortDate } from './components/Gantt.jsx';
 import { STATUS_META } from '../config/roles.js';
 
 const labelOf = (s) => STATUS_META[s]?.label || s;
 const trunc = (s, n = 44) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s);
+const spanOf = (t) => (t?.span?.start && t?.span?.end ? `${shortDate(t.span.start)} → ${shortDate(t.span.end)}` : '');
 
 const TABS = {
   mine: { label: 'Mi línea de tiempo', icon: '🧑‍💻', desc: 'Tus tareas asignadas y las que te corresponden por rol, con los sprints como franjas (1 SP = 1 día).' },
@@ -57,7 +59,7 @@ function MineTab({ data, canDrag, onReschedule }) {
     return {
       id: t.id,
       title: `${t.id} · ${trunc(t.title, 38)}`,
-      subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP${t.sprint ? ` · ${t.sprint.name}` : ''}`,
+      subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP · ${spanOf(t)}${t.sprint ? ` · ${t.sprint.name}` : ''}`,
       start: t.span.start,
       end: t.span.end,
       tone: t.tone,
@@ -134,7 +136,7 @@ function ByPITab({ data, canDrag, onReschedule }) {
         items.push({
           id: `${pi.id}-${t.id}`,
           title: `${t.id} · ${trunc(t.title, 38)}`,
-          subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP${t.assignee ? ` · ${t.assignee}` : ''}${t.iteration ? ` · ${t.iteration}` : ''}`,
+          subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP · ${spanOf(t)}${t.assignee ? ` · ${t.assignee}` : ''}${t.iteration ? ` · ${t.iteration}` : ''}`,
           start: t.span.start,
           end: t.span.end,
           tone: t.tone,
@@ -214,7 +216,7 @@ function ProjectsTab({ data, canDrag, onReschedule }) {
         items.push({
           id: t.id,
           title: `${t.id} · ${trunc(t.title, 38)}`,
-          subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP${t.assignee ? ` · ${t.assignee}` : ''}${t.sprint ? ` · ${t.sprint.name}` : ''}${t.epic ? '' : ' · sin épica'}`,
+          subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP · ${spanOf(t)}${t.assignee ? ` · ${t.assignee}` : ''}${t.sprint ? ` · ${t.sprint.name}` : ''}${t.epic ? '' : ' · sin épica'}`,
           start: t.span.start,
           end: t.span.end,
           tone: t.tone,
@@ -228,7 +230,7 @@ function ProjectsTab({ data, canDrag, onReschedule }) {
       items.push({
         id: t.id,
         title: `${t.id} · ${trunc(t.title, 38)}`,
-        subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP${t.assignee ? ` · ${t.assignee}` : ''}${t.sprint ? ` · ${t.sprint.name}` : ''}`,
+        subtitle: `${labelOf(t.status)} · ${t.storyPoints || 0} SP · ${spanOf(t)}${t.assignee ? ` · ${t.assignee}` : ''}${t.sprint ? ` · ${t.sprint.name}` : ''}`,
         start: t.span.start,
         end: t.span.end,
         tone: t.tone,
@@ -268,6 +270,7 @@ function ProjectsTab({ data, canDrag, onReschedule }) {
 
 export default function TimelineView() {
   const { user } = useAuth();
+  const toast = useToast();
   const { data, loading, error, reload } = useApi(() => TimelineModel.get(), [user.role]);
 
   const [tab, setTab] = useState(null);
@@ -283,10 +286,10 @@ export default function TimelineView() {
   async function reschedule(taskId, sprintId) {
     try {
       await TaskModel.assignSprint(taskId, sprintId);
+      toast.success(sprintId ? `${taskId} reprogramada al sprint seleccionado.` : `${taskId} movida fuera de sprint.`);
       await reload();
     } catch (e) {
-      // falla silenciosa: el Gantt se mantiene sin cambios
-      console.error('No se pudo reprogramar:', e.message);
+      toast.error(`No se pudo reprogramar: ${e.message}`);
     }
   }
 
@@ -305,7 +308,7 @@ export default function TimelineView() {
 
       {canDrag && (
         <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
-          <Badge tone="ok">Arrastra las barras para reprogramar en otro sprint (1 SP = 1 día)</Badge>
+          <Badge tone="ok">Arrastra una barra para moverla en el tiempo · cada barra muestra su rango de fechas (1 SP = 1 día)</Badge>
         </div>
       )}
 

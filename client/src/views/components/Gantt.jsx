@@ -20,7 +20,7 @@ function mondayBefore(d) {
   const shift = (d.getUTCDay() + 6) % 7;
   return addDays(d, -shift);
 }
-function shortDate(s) {
+export function shortDate(s) {
   const [, m, day] = String(s).split('-');
   return `${day} ${MONTHS[parseInt(m, 10) - 1]}`;
 }
@@ -161,7 +161,8 @@ export default function GanttChart({
     const rowBands = item.bands?.length ? item.bands : bands;
     const isDragging = drag && drag.id === item.id && drag.active;
     const barStart = isDragging ? drag.newStart : item.start;
-    const barEnd = isDragging ? addDays(parseDate(barStart), Math.max(0, diffDays(item.start, item.end))) : item.end;
+    const barEndRaw = isDragging ? addDays(parseDate(barStart), Math.max(0, diffDays(item.start, item.end))) : item.end;
+    const barEnd = barEndRaw instanceof Date ? fmtDate(barEndRaw) : barEndRaw;
     rows.push(
       <div key={item.id} className={`gantt-track${isDragging ? ' gantt-dragging' : ''}`}>
         <div className="gantt-label" title={item.subtitle}>
@@ -202,12 +203,14 @@ export default function GanttChart({
             onPointerUp={draggable ? () => endDrag(item) : undefined}
             onPointerCancel={draggable ? () => setDrag(null) : undefined}
           >
+            {draggable && !isDragging && <span className="gantt-grip" aria-hidden>⣿</span>}
+            {barStart && barEnd && <span className="gantt-bar-dates">{shortDate(barStart)} – {shortDate(barEnd)}</span>}
             {item.to && !draggable && <NavLink to={item.to} className="gantt-bar-link" />}
           </span>
           {isDragging && (
-            <span className="gantt-drag-hint" style={{ left: Math.max(4, x(barStart)) }}>
-              {shortDate(drag.targetStart)}
-              {drag.targetSprint ? ` → ${drag.targetSprint.name}` : ' → backlog'}
+            <span className="gantt-drag-tip" style={{ left: Math.max(4, x(barStart)) }}>
+              <b>{shortDate(barStart)} → {shortDate(barEnd)}</b>
+              <em>{drag.targetSprint ? `→ ${drag.targetSprint.name}` : '→ sin sprint'}</em>
             </span>
           )}
           {today && !isDragging && <span className="gantt-today" style={{ left: x(today) }} />}
@@ -265,7 +268,10 @@ export default function GanttChart({
   return (
     <div className="gantt" style={{ '--gantt-day': `${dayWidth}px` }}>
       <div className="gantt-axis">
-        <div className="gantt-axis-label">Fecha</div>
+        <div className="gantt-axis-label">
+          <span>Fecha</span>
+          <small>{shortDate(fmtDate(axisStart))} → {shortDate(fmtDate(axisEnd))}</small>
+        </div>
         <div className="gantt-axis-stack" style={{ width: totalPx }}>
           {/* Fila 0: meses */}
           <div className="gantt-axis-line gantt-month-line">

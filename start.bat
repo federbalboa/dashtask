@@ -17,6 +17,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [0/3] Liberando puertos 4100 y 5173 si estan en uso...
+powershell -NoProfile -Command "foreach ($port in 4100,5173) { Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
+
 echo [1/3] Instalando dependencias...
 call npm install
 if errorlevel 1 (

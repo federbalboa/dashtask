@@ -5,6 +5,8 @@
 const TOKEN_KEY = 'dashtask.token';
 const USER_KEY = 'dashtask.user';
 
+const API_BASE = `${import.meta.env.BASE_URL}api`.replace(/\/{2,}/g, '/');
+
 export const session = {
   getToken: () => localStorage.getItem(TOKEN_KEY),
   getUser: () => {
@@ -26,7 +28,7 @@ export const session = {
 
 async function request(path, { method = 'GET', body, headers = {} } = {}) {
   const token = session.getToken();
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -75,6 +77,10 @@ export const IntakeModel = {
   reschedule: (id, payload) => request(`/intakes/${id}/reschedule`, { method: 'POST', body: payload }),
   perspective: (id, payload) => request(`/intakes/${id}/perspective`, { method: 'POST', body: payload }),
   estimate: (id, payload) => request(`/intakes/${id}/estimate`, { method: 'POST', body: payload }),
+  setRequirement: (id, key, payload) => request(`/intakes/${id}/requirements/${key}`, { method: 'PATCH', body: payload }),
+  addRequirement: (id, payload) => request(`/intakes/${id}/requirements`, { method: 'POST', body: payload }),
+  updateRequirement: (id, key, payload) => request(`/intakes/${id}/requirements/${key}/meta`, { method: 'PATCH', body: payload }),
+  removeRequirement: (id, key) => request(`/intakes/${id}/requirements/${key}`, { method: 'DELETE' }),
   remove: (id) => request(`/intakes/${id}`, { method: 'DELETE' }),
 };
 
@@ -84,6 +90,7 @@ export const TaskModel = {
   get: (id) => request(`/tasks/${id}`),
   create: (payload) => request('/tasks', { method: 'POST', body: payload }),
   update: (id, payload) => request(`/tasks/${id}`, { method: 'PATCH', body: payload }),
+  editDetails: (id, payload) => request(`/tasks/${id}/details`, { method: 'PATCH', body: payload }),
   move: (id, status, blockedReason) =>
     request(`/tasks/${id}/move`, { method: 'POST', body: { status, blockedReason } }),
   advance: (id) => request(`/tasks/${id}/advance`, { method: 'POST' }),
@@ -140,7 +147,13 @@ export const TimelineModel = {
 export const ResourceModel = {
   list: (projectId = '') => request(`/resources${projectId ? `?projectId=${projectId}` : ''}`),
   candidates: (projectId) => request(`/resources/candidates?projectId=${projectId}`),
-  add: (projectId, userId) => request('/resources', { method: 'POST', body: { projectId, userId } }),
+  add: (projectId, userId, sprintId = null) =>
+    request('/resources', { method: 'POST', body: { projectId, userId, sprintId } }),
+  assignSprint: (resourceId, sprintId) =>
+    request(`/resources/${resourceId}/sprints`, { method: 'POST', body: { sprintId } }),
+  unassignSprint: (resourceId, sprintId) =>
+    request(`/resources/${resourceId}/sprints/${sprintId}`, { method: 'DELETE' }),
+  update: (id, payload) => request(`/resources/${id}`, { method: 'PATCH', body: payload }),
   remove: (id) => request(`/resources/${id}`, { method: 'DELETE' }),
 };
 
@@ -160,4 +173,11 @@ export const AdminModel = {
 export const ChangeModel = {
   list: (status = '') => request(`/changes${status ? `?status=${status}` : ''}`),
   decide: (id, payload) => request(`/changes/${id}/decide`, { method: 'POST', body: payload }),
+};
+
+export const BlockModel = {
+  list: (status = '') => request(`/blocks${status ? `?status=${status}` : ''}`),
+  forTask: (taskId) => request(`/blocks?taskId=${taskId}`),
+  create: (taskId, reason) => request('/blocks', { method: 'POST', body: { taskId, reason } }),
+  decide: (id, payload) => request(`/blocks/${id}/decide`, { method: 'POST', body: payload }),
 };

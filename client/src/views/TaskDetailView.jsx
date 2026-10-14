@@ -3,12 +3,13 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../controllers/useApi.js';
 import { useToast } from '../controllers/ToastContext.jsx';
 import { useAuth } from '../controllers/AuthContext.jsx';
-import { TaskModel, SprintModel } from '../models/api.js';
+import { TaskModel, SprintModel, BlockModel } from '../models/api.js';
 import { TASK_STAGES, stageMeta, stagesForStatus, nextStageId, STAGE_IDS } from '../config/taskFlow.js';
 import { getRole } from '../config/roles.js';
 import { changeStatusMeta, reasonCodeMeta } from '../config/reschedule.js';
 import { Card, Badge, StatusBadge, ClassBadge, Bar, Empty, Spinner, RoleBadge, Field } from './components/UI.jsx';
 import RescheduleModal from './components/RescheduleModal.jsx';
+import TaskEditModal from './components/TaskEditModal.jsx';
 import ChangeLog from './components/ChangeLog.jsx';
 
 export default function TaskDetailView() {
@@ -20,6 +21,8 @@ export default function TaskDetailView() {
   const [notes, setNotes] = useState({});
   const [busy, setBusy] = useState('');
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [blockNote, setBlockNote] = useState({});
 
   // Deep-link: mostrar y resaltar el punto exacto del checklist que debo marcar.
   const focusKey = params.get('focus') || '';
@@ -92,12 +95,18 @@ export default function TaskDetailView() {
   };
 
   const block = async () => {
-    const reason = window.prompt('Motivo del bloqueo:') || '';
+    const reason = window.prompt('Motivo del bloqueo (lo autoriza LPM, Product Management o el Admin):') || '';
+    if (!reason.trim()) return;
+    setBusy('block');
     try {
-      await TaskModel.move(task.id, 'blocked', reason);
+      const r = await BlockModel.create(task.id, reason.trim());
+      if (r.applied) toast.success('Tarea bloqueada (el solicitante es aprobador).');
+      else toast.success('Solicitud de bloqueo enviada: LPM, Product Management o el Admin deben autorizarla.');
       reload();
     } catch (e) {
       toast.error(e.message);
+    } finally {
+      setBusy('');
     }
   };
 
@@ -107,6 +116,19 @@ export default function TaskDetailView() {
       reload();
     } catch (e) {
       toast.error(e.message);
+    }
+  };
+
+  const decideBlock = async (block, approve) => {
+    setBusy(`blk-${block.id}`);
+    try {
+      await BlockModel.decide(block.id, { approve, note: blockNote[block.id] || '' });
+      toast.success(approve ? 'Bloqueo autorizado: la tarea pasa a Bloqueado.' : 'Bloqueo rechazado: la tarea continúa.');
+      reload();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy('');
     }
   };
 
@@ -181,6 +203,10 @@ export default function TaskDetailView() {
           />
         )}
 
+        {editOpen && (
+          <TaskEditModal ctx={data} onClose={() => setEditOpen(false)} onSaved={reload} />
+        )}
+
         {/* Stepper de etapas */}
         <div className="stage-stepper">
           {flow.map((s, i) => (
@@ -204,12 +230,12 @@ export default function TaskDetailView() {
           {isBlocked ? (
             <button className="btn" onClick={unblock}>Desbloquear</button>
           ) : (
-            <button className="btn ghost" onClick={block}>⛔ Bloquear</button>
+            <button className="btn ghost" onClick={block} disabled={busy === 'block'}>⛔ Bloquear</button>
           )}
+          <button className="btn" onClick={() => setEditOpen(true)}>✎ Editar tarea</button>
           <div className="spacer" />
           <select className="mini" value={status} onChange={(e) => directMove(e.target.value)} title="Mover directamente">
             {STAGE_IDS.map((s) => <option key={s} value={s}>{stageMeta(s).label}</option>)}
-            <option value="blocked">Bloqueado</option>
           </select>
         </div>
         {!isBlocked && !currentComplete && currentItems.length > 0 && (
@@ -360,10 +386,60 @@ export default function TaskDetailView() {
             )}
           </Card>
 
+          {/* Bloqueos (con autorización del portafolio / PM / admin) */}
+          <Card
+            title={`Bloqueos (${data.blocks?.length || 0})`}
+            hint="Bloquear requiere autorización de LPM, Product Management, Admin o permiso de aprobar bloqueos"
+          >
+            {(!data.blocks || data.blocks.length === 0) ? (
+              <Empty>Sin solicitudes de bloqueo. Usa “⛔ Bloquear” para levantar una solicitud.</Empty>
+            ) : (
+              <div className="list" style={{ gap: 8 }}>
+                {data.blocks.map((b) => {
+                  const tone = b.status === 'approved' ? 'ok' : b.status === 'rejected' ? 'danger' : 'warn';
+                  const label = b.status === 'approved' ? 'Autorizado' : b.status === 'rejected' ? 'Rechazado' : 'Por autorizar';
+                  const pending = b.status === 'pending';
+                  return (
+                    <div className="list-item audit-item" key={b.id} style={{ display: 'block' }}>
+                      <div className="row wrap" style={{ justifyContent: 'space-between', gap: 8 }}>
+                        <div className="row wrap" style={{ gap: 8 }}>
+                          <span className="mono muted-2" style={{ fontSize: 11 }}>{b.id}</span>
+                          <Badge tone={tone} dot>{label}</Badge>
+                        </div>
+                        <span className="mono muted-2" style={{ fontSize: 11 }}>{b.at?.replace('T', ' ').slice(0, 16)}</span>
+                      </div>
+                      <div className="li-sub" style={{ whiteSpace: 'normal', marginTop: 4 }}>
+                        “{b.reason}” · pedido por {b.requester} <RoleBadge role={b.requesterRole} />
+                        {b.decidedBy ? <div className="muted-2">Resuelto por {b.decidedBy} <RoleBadge role={b.decidedRole} />{b.decisionNote ? ` · ${b.decisionNote}` : ''}</div> : null}
+                      </div>
+                      {pending && data.canApproveBlocks && (
+                        <div className="row wrap" style={{ gap: 8, marginTop: 8, alignItems: 'center' }}>
+                          <input
+                            className="grow mini"
+                            placeholder="Nota de la decisión (opcional)"
+                            value={blockNote[b.id] || ''}
+                            onChange={(e) => setBlockNote((s) => ({ ...s, [b.id]: e.target.value }))}
+                          />
+                          <button className="btn danger sm" disabled={busy === `blk-${b.id}`} onClick={() => decideBlock(b, false)}>✕ Rechazar</button>
+                          <button className="btn ok sm" disabled={busy === `blk-${b.id}`} onClick={() => decideBlock(b, true)}>✓ Autorizar</button>
+                        </div>
+                      )}
+                      {pending && !data.canApproveBlocks && (
+                        <div className="muted-2" style={{ fontSize: 11.5, marginTop: 6 }}>
+                          Pendiente de autorización por LPM, Product Management o el Admin.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
           {/* Bitácora del checklist (quién, cuándo, qué) */}
           <Card
-            title="Bitácora del checklist"
-            hint="Fecha/hora, persona y movimiento registrados"
+            title="Bitácora y auditoría"
+            hint="Fecha/hora, persona y movimiento registrados de cada cambio"
           >
             {(!task.auditLog || task.auditLog.length === 0) ? (
               <Empty>Sin actividad registrada todavía.</Empty>
@@ -419,8 +495,21 @@ const AUDIT_LABEL = {
   block: 'Bloqueó ⛔',
   assign: 'Programó 🗓',
   unassign: 'Sin sprint',
+  edit: 'Editó ✎',
+  blockRequested: 'Solicitó ⛔',
+  blockApproved: 'Autorizó ✓',
+  blockRejected: 'Rechazó ✕',
+  delivery: 'Entrega 🗓',
 };
 function auditLabel(e) {
+  if (e.type === 'edit') return AUDIT_LABEL.edit;
+  if (e.type === 'block') {
+    if (e.action === 'requested') return AUDIT_LABEL.blockRequested;
+    if (e.action === 'approved') return AUDIT_LABEL.blockApproved;
+    if (e.action === 'rejected') return AUDIT_LABEL.blockRejected;
+    return AUDIT_LABEL.block;
+  }
+  if (e.type === 'reschedule') return AUDIT_LABEL.delivery;
   if (e.action === 'unblock') return AUDIT_LABEL.unblock;
   if (e.action === 'done') return AUDIT_LABEL.done;
   if (e.action === 'reopened') return AUDIT_LABEL.reopened;
@@ -430,6 +519,13 @@ function auditLabel(e) {
   return AUDIT_LABEL.advance;
 }
 function auditTone(e) {
+  if (e.type === 'edit') return 'accent';
+  if (e.type === 'reschedule') return 'info';
+  if (e.type === 'block') {
+    if (e.action === 'approved') return 'ok';
+    if (e.action === 'rejected') return 'warn';
+    return 'danger';
+  }
   if (e.type === 'blocked' || e.action === 'block') return 'danger';
   if (e.type === 'regression' || e.action === 'reopened') return 'warn';
   if (e.type === 'checklist' && e.action === 'done') return 'ok';

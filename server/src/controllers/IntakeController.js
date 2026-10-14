@@ -1,6 +1,23 @@
-import { IntakeModel, completeness, missingFields, computeWsjf } from '../models/IntakeModel.js';
+import { IntakeModel, completenessOf, normalizeRequirements, pendingByRole, computeWsjf } from '../models/IntakeModel.js';
 import { ChangeModel } from '../models/ChangeModel.js';
+import { PermissionModel } from '../models/PermissionModel.js';
 import { RescheduleService } from '../services/RescheduleService.js';
+import { MANAGE_ROLES, INTAKE_REQUIREMENT_ROLES } from '../config/intakeRequirements.js';
+
+/** Gestión de la estructura de requisitos: PM, Admin o permiso global. */
+function canManageRequirements(user) {
+  if (!user) return false;
+  if (MANAGE_ROLES.includes(user.role)) return true;
+  return !!PermissionModel.findByUser(user.id)?.canMarkAnyChecklist;
+}
+
+/** Cada rol sólo coloca el valor de los requisitos que le tocan (PM/Admin/permiso global: todos). */
+function canEditRequirement(user, item) {
+  if (!user || !item) return false;
+  if (user.role === 'admin' || user.role === 'product_manager') return true;
+  if (user.role === item.role) return true;
+  return !!PermissionModel.findByUser(user.id)?.canMarkAnyChecklist;
+}
 
 /** CONTROLADOR: Intake (revisión primaria, triage y flujo a backlog) */
 export const IntakeController = {
@@ -8,7 +25,7 @@ export const IntakeController = {
     let intakes = IntakeModel.all();
     if (req.query.status) intakes = intakes.filter((i) => i.status === req.query.status);
     return res.json({
-      intakes: intakes.map(withMeta),
+      intakes: intakes.map((i) => withMeta(i, req.user)),
       stats: buildStats(),
     });
   },
@@ -16,7 +33,7 @@ export const IntakeController = {
   get: (req, res) => {
     const intake = IntakeModel.findById(req.params.id);
     if (!intake) return res.status(404).json({ error: 'Intake no encontrado.' });
-    return res.json({ intake: withMeta(intake) });
+    return res.json({ intake: withMeta(intake, req.user) });
   },
 
   create: (req, res) => {
@@ -25,19 +42,15 @@ export const IntakeController = {
       return res.status(400).json({ error: 'Título y descripción son obligatorios.' });
     }
     const created = IntakeModel.create(payload);
-    return res.status(201).json({ intake: withMeta(created) });
+    return res.status(201).json({ intake: withMeta(created, req.user) });
   },
 
   update: (req, res) => {
     const updated = IntakeModel.update(req.params.id, req.body || {});
     if (!updated) return res.status(404).json({ error: 'Intake no encontrado.' });
-    return res.json({ intake: withMeta(updated) });
+    return res.json({ intake: withMeta(updated, req.user) });
   },
 
-  /**
-   * Reprograma la fecha objetivo del intake con motivo identificado.
-   * Incidencia → inmediata; control de cambios → solicitud que autoriza el portafolio.
-   */
   reschedule: (req, res) => {
     const intake = IntakeModel.findById(req.params.id);
     if (!intake) return res.status(404).json({ error: 'Intake no encontrado.' });
@@ -53,12 +66,12 @@ export const IntakeController = {
         const change = RescheduleService.requestControl('intake', intake.id, intake.title, {
           from: intake.dueDate, to, reasonCode, note,
         }, req.user);
-        return res.status(201).json({ change, intake: withMeta(IntakeModel.findById(intake.id)), pending: true });
+        return res.status(201).json({ change, intake: withMeta(IntakeModel.findById(intake.id), req.user), pending: true });
       }
       const change = RescheduleService.applyIncidencia('intake', intake.id, intake.title, {
         from: intake.dueDate, to, reasonCode, note,
       }, req.user);
-      return res.json({ change, intake: withMeta(IntakeModel.findById(intake.id)), applied: true });
+      return res.json({ change, intake: withMeta(IntakeModel.findById(intake.id), req.user), applied: true });
     } catch (e) {
       return res.status(409).json({ error: e.message });
     }
@@ -70,7 +83,7 @@ export const IntakeController = {
     const intake = IntakeModel.findById(req.params.id);
     if (!intake) return res.status(404).json({ error: 'Intake no encontrado.' });
 
-    const missing = missingFields(intake.checklist);
+    const missing = completenessOf(intake).missing;
     let patch = { triagedBy: triagedBy || 'Intake Manager' };
 
     switch (action) {
@@ -98,9 +111,6 @@ export const IntakeController = {
         };
         break;
       case 'prioritize': {
-        // PASO DEL PROCESO: la priorización ocurre en la ceremonia de Grooming /
-        // Backlog Review. Se exige la perspectiva de Product Management y al
-        // menos otra más por rol antes de priorizar (revisión conjunta del PI).
         const perspectives = intake.perspectives || [];
         const hasPm = perspectives.some((p) => p.role === 'product_manager');
         const hasOthers = perspectives.length >= 2;
@@ -121,7 +131,7 @@ export const IntakeController = {
     }
 
     const updated = IntakeModel.update(req.params.id, patch);
-    return res.json({ intake: withMeta(updated) });
+    return res.json({ intake: withMeta(updated, req.user) });
   },
 
   /** Revisión conjunta: cada rol involucrado registra su perspectiva. */
@@ -135,7 +145,7 @@ export const IntakeController = {
       by: req.user.name,
       comment,
     });
-    return res.json({ intake: withMeta(updated) });
+    return res.json({ intake: withMeta(updated, req.user) });
   },
 
   /** Estimación en Story Points por rol involucrado (la consolida el PM). */
@@ -148,7 +158,61 @@ export const IntakeController = {
       return res.status(400).json({ error: 'Rol y puntos (número) son obligatorios.' });
     }
     const updated = IntakeModel.addEstimate(req.params.id, { role, by: req.user.name, points: pts });
-    return res.json({ intake: withMeta(updated) });
+    return res.json({ intake: withMeta(updated, req.user) });
+  },
+
+  /** Cada rol coloca el valor / marca su requisito de información. */
+  setRequirement: (req, res) => {
+    const intake = IntakeModel.findById(req.params.id);
+    if (!intake) return res.status(404).json({ error: 'Intake no encontrado.' });
+    const item = normalizeRequirements(intake).find((r) => r.key === req.params.key);
+    if (!item) return res.status(404).json({ error: 'Requisito no encontrado.' });
+    if (!canEditRequirement(req.user, item)) {
+      return res.status(403).json({ error: `Tu rol (${req.user.role}) no puede editar este requisito (rol: ${item.role}).` });
+    }
+    const { value, done, note } = req.body || {};
+    const updated = IntakeModel.setRequirement(req.params.id, req.params.key, { value, done, note }, { byName: req.user.name });
+    if (!updated) return res.status(404).json({ error: 'Requisito no encontrado.' });
+    return res.json({ intake: withMeta(updated, req.user) });
+  },
+
+  /** Product Management agrega un requisito (y asigna el rol que debe llenarlo). */
+  addRequirement: (req, res) => {
+    if (!canManageRequirements(req.user)) {
+      return res.status(403).json({ error: 'Solo Product Management / Admin gestionan los requisitos del intake.' });
+    }
+    const { label, role, key } = req.body || {};
+    if (!label && !key) return res.status(400).json({ error: 'El requisito necesita un nombre.' });
+    if (role && !INTAKE_REQUIREMENT_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Rol inválido para el requisito.' });
+    }
+    const updated = IntakeModel.upsertRequirement(req.params.id, { key, label, role });
+    if (!updated) return res.status(404).json({ error: 'Intake no encontrado.' });
+    return res.json({ intake: withMeta(updated, req.user) });
+  },
+
+  /** Product Management edita el nombre o el rol dueño de un requisito. */
+  updateRequirement: (req, res) => {
+    if (!canManageRequirements(req.user)) {
+      return res.status(403).json({ error: 'Solo Product Management / Admin gestionan los requisitos del intake.' });
+    }
+    const { label, role } = req.body || {};
+    if (role && !INTAKE_REQUIREMENT_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Rol inválido para el requisito.' });
+    }
+    const updated = IntakeModel.upsertRequirement(req.params.id, { key: req.params.key, label, role });
+    if (!updated) return res.status(404).json({ error: 'Intake no encontrado.' });
+    return res.json({ intake: withMeta(updated, req.user) });
+  },
+
+  /** Product Management quita un requisito del intake. */
+  removeRequirement: (req, res) => {
+    if (!canManageRequirements(req.user)) {
+      return res.status(403).json({ error: 'Solo Product Management / Admin gestionan los requisitos del intake.' });
+    }
+    const updated = IntakeModel.removeRequirement(req.params.id, req.params.key);
+    if (!updated) return res.status(404).json({ error: 'Intake no encontrado.' });
+    return res.json({ intake: withMeta(updated, req.user) });
   },
 
   remove: (req, res) => {
@@ -158,13 +222,17 @@ export const IntakeController = {
   },
 };
 
-function withMeta(intake) {
-  const c = completeness(intake.checklist);
+function withMeta(intake, user) {
+  const c = completenessOf(intake);
+  const requirements = normalizeRequirements(intake).map((r) => ({ ...r, canEdit: canEditRequirement(user, r) }));
   const perspectives = intake.perspectives || [];
   return {
     ...intake,
+    requirements,
     completeness: c,
-    missingFields: missingFields(intake.checklist),
+    missingFields: c.missing,
+    pendingByRole: pendingByRole(intake),
+    canManageRequirements: canManageRequirements(user),
     review: {
       perspectives: perspectives.length,
       hasPm: perspectives.some((p) => p.role === 'product_manager'),
@@ -190,7 +258,7 @@ function buildStats() {
     acc[i.status] = (acc[i.status] || 0) + 1;
     return acc;
   }, {});
-  const complete = all.filter((i) => completeness(i.checklist).percent === 100).length;
+  const complete = all.filter((i) => completenessOf(i).percent === 100).length;
   return {
     total: all.length,
     byStatus,

@@ -8,6 +8,7 @@ router.get('/board', TaskController.board);
 router.post('/', TaskController.create);
 router.get('/:id', TaskController.get);
 router.patch('/:id', TaskController.update);
+router.patch('/:id/details', TaskController.editDetails);
 router.post('/:id/reschedule', TaskController.reschedule);
 router.post('/:id/move', TaskController.move);
 router.post('/:id/advance', TaskController.advance);

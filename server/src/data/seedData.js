@@ -2,7 +2,7 @@ import { DEMO_PASSWORD } from '../config/paths.js';
 import { buildChecklist } from '../config/taskFlow.js';
 
 // v9: equipos gestionables por admin (ecosistemas) + control de cambios de entregas (motivos).
-export const SEED_VERSION = 9;
+export const SEED_VERSION = 12;
 
 const USER = (id, name, email, role, opts = {}) => ({
   id,
@@ -1905,6 +1905,62 @@ export function buildSeed() {
     ],
   };
 
+  /* ---------------- Backlog adicional por proyecto (para planificación de sprints) ---------------- */
+  const backlogSeed = [
+    { project: 'PRJ-001', epic: 'EPC-001', title: 'Exportar flujo de onboarding a CSV', type: 'Feature', pts: 3, prio: 'Media', wsjf: 5.2 },
+    { project: 'PRJ-001', epic: 'EPC-001', title: 'Onboarding multi-idioma (ES/EN/PT)', type: 'Feature', pts: 8, prio: 'Media', wsjf: 5.8 },
+    { project: 'PRJ-001', epic: 'EPC-002', title: 'Centro de preferencias de notificaciones', type: 'Feature', pts: 5, prio: 'Alta', wsjf: 7.1 },
+    { project: 'PRJ-002', epic: 'EPC-003', title: 'Auditoría de llamadas a la API de pagos', type: 'Enabler', pts: 5, prio: 'Alta', wsjf: 7.0 },
+    { project: 'PRJ-002', epic: 'EPC-003', title: 'Idempotencia en reintentos de pago', type: 'Feature', pts: 8, prio: 'Alta', wsjf: 8.4 },
+    { project: 'PRJ-002', epic: 'EPC-005', title: 'Panel de conciliación diaria', type: 'Feature', pts: 5, prio: 'Media', wsjf: 5.5 },
+    { project: 'PRJ-003', epic: 'EPC-004', title: 'Alertas de latencia p95 por servicio', type: 'Feature', pts: 5, prio: 'Alta', wsjf: 7.2 },
+    { project: 'PRJ-003', epic: 'EPC-004', title: 'Retención de logs configurable por entorno', type: 'Enabler', pts: 3, prio: 'Media', wsjf: 4.5 },
+    { project: 'PRJ-003', epic: 'EPC-004', title: 'Dashboard de errores por release', type: 'Feature', pts: 5, prio: 'Media', wsjf: 6.0 },
+    { project: 'PRJ-004', epic: 'EPC-006', title: 'Catálogo de datos con linaje', type: 'Feature', pts: 8, prio: 'Media', wsjf: 6.5 },
+    { project: 'PRJ-004', epic: 'EPC-006', title: 'Particionado de tablas históricas', type: 'Enabler', pts: 5, prio: 'Media', wsjf: 5.0 },
+    { project: 'PRJ-004', epic: 'EPC-007', title: 'API de métricas self-service', type: 'Feature', pts: 5, prio: 'Alta', wsjf: 7.5 },
+    { project: 'PRJ-005', epic: 'EPC-008', title: 'Reporte de adopción por segmento', type: 'Feature', pts: 5, prio: 'Media', wsjf: 6.0 },
+    { project: 'PRJ-005', epic: 'EPC-008', title: 'Exportación programada de reportes', type: 'Feature', pts: 3, prio: 'Baja', wsjf: 4.2 },
+    { project: 'PRJ-005', epic: 'EPC-008', title: 'Catálogo de KPIs unificado', type: 'Enabler', pts: 8, prio: 'Media', wsjf: 6.0 },
+    { project: 'PRJ-006', epic: 'EPC-009', title: 'Modo offline para consultas básicas', type: 'Feature', pts: 8, prio: 'Alta', wsjf: 7.4 },
+    { project: 'PRJ-006', epic: 'EPC-009', title: 'Conciliación de notificaciones push', type: 'Feature', pts: 5, prio: 'Media', wsjf: 5.5 },
+    { project: 'PRJ-006', epic: 'EPC-009', title: 'Analítica de embudo móvil', type: 'Enabler', pts: 3, prio: 'Media', wsjf: 4.8 },
+    { project: 'PRJ-007', epic: 'EPC-010', title: 'Dashboard de ventas por engagement', type: 'Feature', pts: 5, prio: 'Media', wsjf: 6.2 },
+    { project: 'PRJ-007', epic: 'EPC-010', title: 'Resumen ejecutivo de capacidades', type: 'Feature', pts: 3, prio: 'Baja', wsjf: 4.0 },
+    { project: 'PRJ-007', epic: 'EPC-010', title: 'Workflow de aprobación de presupuesto', type: 'Enabler', pts: 8, prio: 'Media', wsjf: 6.0 },
+  ];
+
+  backlogSeed.forEach((spec, i) => {
+    const id = `TSK-${String(30 + i).padStart(3, '0')}`;
+    taskLinks[id] = { projectId: spec.project, epicId: spec.epic };
+    tasks.push({
+      id,
+      title: spec.title,
+      description: `Trabajo en backlog para ${spec.project}. Pendiente de planificación en sprint.`,
+      type: spec.type,
+      status: 'backlog',
+      class: 'Standard',
+      priority: spec.prio,
+      wsjf: spec.wsjf,
+      storyPoints: spec.pts,
+      assigneeId: '',
+      assignee: 'Sin asignar',
+      reporterId: 'USR-008',
+      team: 'Nébula',
+      valueStream: 'Cliente Digital',
+      pi: 'PI-2026.1',
+      iteration: 'Backlog',
+      level: 'team',
+      ac: [],
+      dependencies: [],
+      labels: ['#backlog'],
+      blockedReason: '',
+      createdAt: '2026-01-05T09:00:00Z',
+      updatedAt: '2026-01-05T09:00:00Z',
+      dueDate: '',
+    });
+  });
+
   tasks.forEach((t) => {
     const link = taskLinks[t.id] || {};
     t.projectId = link.projectId || null;
@@ -1986,30 +2042,30 @@ export function buildSeed() {
     ],
     resources: [
       // Equipos de desarrollo registrados por cada PM (reparto por proyecto).
-      // Andrés Gómez (USR-004) → PCD, CORE · Daniela Ortiz (USR-020) → ANA, DAT, BI
-      // · Roberto Salas (USR-021) → BAN, CAN. Algunos devs son compartidos.
+      // Un recurso puede pertenecer a varios sprints del proyecto (líneas de tiempo
+      // distintas), por eso `sprintIds` es una lista (permite reutilizar personas).
       // --- Andrés Gómez (PM1) ---
-      { id: 'RES-001', projectId: 'PRJ-001', userId: 'USR-009', addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-002', projectId: 'PRJ-001', userId: 'USR-016', addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-003', projectId: 'PRJ-001', userId: 'USR-025', addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-004', projectId: 'PRJ-002', userId: 'USR-012', addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-005', projectId: 'PRJ-002', userId: 'USR-011', addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-001', projectId: 'PRJ-001', userId: 'USR-009', sprintIds: ['SPR-001'], addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-002', projectId: 'PRJ-001', userId: 'USR-016', sprintIds: ['SPR-002'], addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-003', projectId: 'PRJ-001', userId: 'USR-025', sprintIds: ['SPR-001', 'SPR-002'], addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-004', projectId: 'PRJ-002', userId: 'USR-012', sprintIds: ['SPR-003'], addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-005', projectId: 'PRJ-002', userId: 'USR-011', sprintIds: ['SPR-003', 'SPR-004'], addedBy: 'Andrés Gómez', addedAt: '2026-01-05T10:00:00Z' },
       // --- Daniela Ortiz (PM2) ---
-      { id: 'RES-006', projectId: 'PRJ-003', userId: 'USR-013', addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-007', projectId: 'PRJ-003', userId: 'USR-026', addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-008', projectId: 'PRJ-003', userId: 'USR-024', addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-009', projectId: 'PRJ-004', userId: 'USR-017', addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-010', projectId: 'PRJ-004', userId: 'USR-026', addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-011', projectId: 'PRJ-005', userId: 'USR-014', addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-012', projectId: 'PRJ-005', userId: 'USR-024', addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-006', projectId: 'PRJ-003', userId: 'USR-013', sprintIds: ['SPR-005'], addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-007', projectId: 'PRJ-003', userId: 'USR-026', sprintIds: ['SPR-005', 'SPR-014'], addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-008', projectId: 'PRJ-003', userId: 'USR-024', sprintIds: ['SPR-014'], addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-009', projectId: 'PRJ-004', userId: 'USR-017', sprintIds: ['SPR-006', 'SPR-007'], addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-010', projectId: 'PRJ-004', userId: 'USR-026', sprintIds: ['SPR-006'], addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-011', projectId: 'PRJ-005', userId: 'USR-013', sprintIds: ['SPR-008'], addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-012', projectId: 'PRJ-005', userId: 'USR-014', sprintIds: ['SPR-008', 'SPR-009'], addedBy: 'Daniela Ortiz', addedAt: '2026-01-05T10:00:00Z' },
       // --- Roberto Salas (PM3) ---
-      { id: 'RES-013', projectId: 'PRJ-006', userId: 'USR-015', addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-014', projectId: 'PRJ-006', userId: 'USR-009', addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
-      { id: 'RES-015', projectId: 'PRJ-006', userId: 'USR-016', addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
-{ id: 'RES-016', projectId: 'PRJ-007', userId: 'USR-012', addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
-    { id: 'RES-017', projectId: 'PRJ-007', userId: 'USR-023', addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
-    { id: 'RES-018', projectId: 'PRJ-006', userId: 'USR-033', addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
-    { id: 'RES-019', projectId: 'PRJ-007', userId: 'USR-034', addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-013', projectId: 'PRJ-006', userId: 'USR-015', sprintIds: ['SPR-010'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-014', projectId: 'PRJ-006', userId: 'USR-009', sprintIds: ['SPR-010', 'SPR-011'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-015', projectId: 'PRJ-006', userId: 'USR-016', sprintIds: ['SPR-011'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-016', projectId: 'PRJ-007', userId: 'USR-012', sprintIds: ['SPR-012'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-017', projectId: 'PRJ-007', userId: 'USR-023', sprintIds: ['SPR-013'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-018', projectId: 'PRJ-006', userId: 'USR-033', sprintIds: ['SPR-010', 'SPR-011'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
+      { id: 'RES-019', projectId: 'PRJ-007', userId: 'USR-034', sprintIds: ['SPR-012', 'SPR-013'], addedBy: 'Roberto Salas', addedAt: '2026-01-05T10:00:00Z' },
     ],
     state,
   };

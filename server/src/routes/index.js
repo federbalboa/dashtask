@@ -13,6 +13,7 @@ import timelineRoutes from './timelineRoutes.js';
 import resourceRoutes from './resourceRoutes.js';
 import adminRoutes from './adminRoutes.js';
 import changeRoutes from './changeRoutes.js';
+import blockRoutes from './blockRoutes.js';
 import { auth } from '../middleware/auth.js';
 
 const router = Router();
@@ -32,5 +33,6 @@ router.use('/calendar', auth, calendarRoutes);
 router.use('/timeline', auth, timelineRoutes);
 router.use('/resources', auth, resourceRoutes);
 router.use('/changes', changeRoutes);
+router.use('/blocks', auth, blockRoutes);
 
 export default router;

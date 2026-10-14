@@ -18,6 +18,7 @@ import TimelineView from './views/TimelineView.jsx';
 import AdminView from './views/AdminView.jsx';
 import GlosarioView from './views/GlosarioView.jsx';
 import ChangesView from './views/ChangesView.jsx';
+import BlocksView from './views/BlocksView.jsx';
 
 function Protected({ children }) {
   const { isAuthenticated, ready } = useAuth();
@@ -48,6 +49,7 @@ export default function App() {
       <Route path="/people" element={<Protected><PeopleView /></Protected>} />
       <Route path="/glosario" element={<Protected><GlosarioView /></Protected>} />
       <Route path="/changes" element={<Protected><ChangesView /></Protected>} />
+      <Route path="/blocks" element={<Protected><BlocksView /></Protected>} />
       <Route path="/admin" element={<Protected><AdminView /></Protected>} />
       <Route path="/tasks/:id" element={<Protected><TaskDetailView /></Protected>} />
       <Route path="/epics/:id" element={<Protected><EpicDetailView /></Protected>} />

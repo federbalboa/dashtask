@@ -24,7 +24,6 @@ export const TimelineController = {
       mine: true,
       byPI: user.role === 'product_manager' || user.role === 'rte',
       projects: ['lpm', 'epic_owner', 'rte', 'business_owner', 'system_architect', 'product_manager'].includes(user.role),
-      resources: ['product_manager', 'rte', 'lpm'].includes(user.role),
     };
 
     const payload = { role: { id: user.role, label: role?.label, level: role?.level, icon: role?.icon }, tabs };

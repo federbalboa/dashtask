@@ -29,9 +29,10 @@ export const AdminController = {
     const userId = req.params.userId;
     const target = UserModel.findById(userId);
     if (!target) return res.status(404).json({ error: 'Usuario no encontrado.' });
-    const { canMarkAnyChecklist, projectIds } = req.body || {};
+    const { canMarkAnyChecklist, canApproveBlocks, projectIds } = req.body || {};
     const perm = PermissionModel.upsert(userId, {
       canMarkAnyChecklist: !!canMarkAnyChecklist,
+      canApproveBlocks: !!canApproveBlocks,
       projectIds: Array.isArray(projectIds) ? projectIds : [],
       grantedBy: req.user.name,
     });

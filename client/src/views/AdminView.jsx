@@ -362,7 +362,7 @@ function PermsTab() {
     if (usersRes.data && permsRes.data && projectsRes.data) {
       const map = {};
       (permsRes.data.permissions || []).forEach((p) => {
-        map[p.userId] = { canMarkAnyChecklist: !!p.canMarkAnyChecklist, projectIds: p.projectIds || [] };
+        map[p.userId] = { canMarkAnyChecklist: !!p.canMarkAnyChecklist, canApproveBlocks: !!p.canApproveBlocks, projectIds: p.projectIds || [] };
       });
       setPerms(map);
       setBooting(false);
@@ -379,12 +379,12 @@ function PermsTab() {
 
   const save = async (userId, patch) => {
     setBusy(userId);
-    const prev = perms[userId] || { canMarkAnyChecklist: false, projectIds: [] };
+    const prev = perms[userId] || { canMarkAnyChecklist: false, canApproveBlocks: false, projectIds: [] };
     try {
       const next = { ...prev, ...patch };
-      if (!next.canMarkAnyChecklist) next.projectIds = [];
+      if (!next.canMarkAnyChecklist && !next.canApproveBlocks) next.projectIds = [];
       const res = await AdminModel.upsertPermission(userId, next);
-      setPerms((p) => ({ ...p, [userId]: { canMarkAnyChecklist: !!res.permission.canMarkAnyChecklist, projectIds: res.permission.projectIds } }));
+      setPerms((p) => ({ ...p, [userId]: { canMarkAnyChecklist: !!res.permission.canMarkAnyChecklist, canApproveBlocks: !!res.permission.canApproveBlocks, projectIds: res.permission.projectIds } }));
       toast.success('Permiso actualizado.');
     } catch (e) {
       toast.error(e.message);
@@ -413,17 +413,18 @@ function PermsTab() {
   return (
     <>
       <div className="page-head">
-        <h1>🛡️ Permisos de checklist</h1>
+        <h1>🛡️ Permisos globales</h1>
         <p>
-          Otorga a un Product/Program Manager el permiso global de marcar cualquier punto del checklist de
-          sus tareas (conduciendo sesiones de refinamiento). El alcance puede limitarse a proyectos concretos.
+          Otorga a un usuario permisos que normalmente reserva su rol: <b>marcar cualquier punto del checklist</b>
+          (por ejemplo para conducir el refinamiento) y/o <b>aprobar bloqueos</b> de tareas. El alcance puede
+          limitarse a proyectos concretos.
         </p>
       </div>
 
       <div className="toolbar">
         <Badge tone="accent">{grantables.length} candidatos</Badge>
         <span className="muted-2" style={{ fontSize: 12 }}>
-          Un usuario con permiso puede marcar puntos de rol <b>product_manager / product_owner / rte / system_architect / business_owner / scrum_master / developer / epic_owner</b>.
+          Un usuario con permiso puede marcar puntos de rol <b>product_manager / product_owner / rte / system_architect / business_owner / scrum_master / developer / epic_owner</b>, y con “aprobar bloqueos” puede autorizar el bloqueo de tareas.
         </span>
       </div>
 
@@ -431,8 +432,9 @@ function PermsTab() {
       <div className="stack" style={{ gap: 14 }}>
         {grantables.map((u) => {
           const role = ROLES[u.role] || {};
-          const perm = perms[u.id] || { canMarkAnyChecklist: false, projectIds: [] };
+          const perm = perms[u.id] || { canMarkAnyChecklist: false, canApproveBlocks: false, projectIds: [] };
           const enabled = perm.canMarkAnyChecklist;
+          const blockEnabled = perm.canApproveBlocks;
           return (
             <Card key={u.id}>
               <div className="row wrap" style={{ gap: 14, justifyContent: 'space-between' }}>
@@ -445,7 +447,7 @@ function PermsTab() {
                   <RoleBadge role={u.role} full />
                 </div>
 
-                <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+                <div className="row wrap" style={{ gap: 14, alignItems: 'center' }}>
                   <label className="row" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
@@ -455,7 +457,16 @@ function PermsTab() {
                     />
                     <span style={{ fontWeight: 600 }}>Puede marcar cualquier checklist</span>
                   </label>
-                  {enabled && (
+                  <label className="row" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={blockEnabled}
+                      disabled={busy === u.id}
+                      onChange={(e) => save(u.id, { canApproveBlocks: e.target.checked })}
+                    />
+                    <span style={{ fontWeight: 600 }}>Puede aprobar bloqueos</span>
+                  </label>
+                  {(enabled || blockEnabled) && (
                     <button className="btn danger xs" disabled={busy === u.id} onClick={() => remove(u.id)}>
                       Revocar
                     </button>
@@ -463,7 +474,7 @@ function PermsTab() {
                 </div>
               </div>
 
-              {enabled && (
+              {(enabled || blockEnabled) && (
                 <div style={{ marginTop: 12 }}>
                   <Field label="Alcance por proyecto (vacío = todos)">
                     <div className="row wrap" style={{ gap: 8 }}>

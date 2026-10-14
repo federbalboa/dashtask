@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../controllers/AuthContext.jsx';
 import { useApi } from '../controllers/useApi.js';
-import { TimelineModel, ResourceModel, TaskModel } from '../models/api.js';
+import { TimelineModel, TaskModel } from '../models/api.js';
 import { Spinner, Empty, Badge, StatRow, Stat, Card } from './components/UI.jsx';
 import GanttChart from './components/Gantt.jsx';
 import { STATUS_META } from '../config/roles.js';
@@ -11,14 +11,12 @@ const labelOf = (s) => STATUS_META[s]?.label || s;
 const trunc = (s, n = 44) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 const TABS = {
-  mine: { label: 'Mi línea de tiempo', icon: '🧑‍💻', desc: 'Tus tareas asignadas y su avance en el Kanban, sobre la línea del tiempo.' },
+  mine: { label: 'Mi línea de tiempo', icon: '🧑‍💻', desc: 'Tus tareas asignadas y las que te corresponden por rol, con los sprints como franjas (1 SP = 1 día).' },
   byPI: { label: 'General · Program Increments', icon: '🧭', desc: 'El ART completo: tareas del Program Backlog asignadas por Program Increment e iteración.' },
-  projects: { label: 'Panorama de proyectos', icon: '🗺️', desc: 'Proyectos del portafolio: proyectos, épicas, sprints y tareas en una sola línea de tiempo.' },
-  resources: { label: 'Recursos disponibles', icon: '🧰', desc: 'Capacidad y Story Points libres de los recursos por sprint (1 SP = 1 día).' },
+  projects: { label: 'Panorama de proyectos', icon: '🗺️', desc: 'Proyectos → épicas → tareas, con los sprints como franjas verticales (1 SP = 1 día).' },
 };
 
 const DRAG_ROLES = ['product_manager', 'rte', 'lpm'];
-const RESOURCE_ROLES = ['product_manager', 'rte', 'lpm'];
 
 const STATUS_TONES = ['backlog', 'in_progress', 'qa', 'uat', 'release', 'blocked'];
 
@@ -48,7 +46,7 @@ function Legend({ role }) {
 function MineTab({ data, canDrag, onReschedule }) {
   const { mine } = data;
   if (!mine || !mine.tasks.length) {
-    return <Empty>No tienes tareas asignadas todavía. Las tuyas aparecerán aquí en la línea del tiempo.</Empty>;
+    return <Empty>No hay tareas {mine?.scopeLabel || 'asignadas a ti'} todavía. Cuando te correspondan tareas, aparecerán aquí en la línea del tiempo.</Empty>;
   }
   const sprintBands = [...new Set((mine.tasks || []).map((t) => t.sprint?.name).filter(Boolean))].map((n) => {
     const t = mine.tasks.find((x) => x.sprint?.name === n);
@@ -76,7 +74,7 @@ function MineTab({ data, canDrag, onReschedule }) {
     <>
       <StatRow
         items={[
-          { label: 'Mis tareas', value: mine.totals.tasks, hint: 'asignadas a ti', tone: 'neutral' },
+          { label: 'Mis tareas', value: mine.totals.tasks, hint: mine.scopeLabel || 'asignadas a ti', tone: 'neutral' },
           { label: 'Story Points', value: mine.tasks.reduce((s, t) => s + (Number(t.storyPoints) || 0), 0), hint: 'esfuerzo total comprometido' },
           { label: 'Entregadas (Release)', value: mine.totals.done, hint: 'valor liberado', tone: 'ok' },
           { label: 'Avance', value: `${mine.totals.donePct}%`, hint: 'de tus tareas completadas' },
@@ -268,136 +266,6 @@ function ProjectsTab({ data, canDrag, onReschedule }) {
   );
 }
 
-/** Pestaña "Recursos disponibles": el PM registra desarrolladores y ve cuántos SP libres tienen por sprint. */
-function ResourcesTab({ data }) {
-  const projects = data.projects?.projects || [];
-  const [projectId, setProjectId] = useState(projects[0]?.id || '');
-  const [resData, setResData] = useState(null);
-  const [cands, setCands] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!projectId) return;
-    setResData(null);
-    loadResources(projectId);
-    loadCandidates(projectId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-
-  async function loadResources(id) {
-    try { setResData(await ResourceModel.list(id)); } catch (e) { setResData({ error: e.message }); }
-  }
-  async function loadCandidates(id) {
-    try { setCands(await ResourceModel.candidates(id)); } catch { setCands(null); }
-  }
-
-  async function addResource(userId) {
-    setBusy(true);
-    try {
-      await ResourceModel.add(projectId, userId);
-      await loadResources(projectId);
-      await loadCandidates(projectId);
-    } finally { setBusy(false); }
-  }
-  async function removeResource(id) {
-    setBusy(true);
-    try {
-      await ResourceModel.remove(id);
-      await loadResources(projectId);
-      await loadCandidates(projectId);
-    } finally { setBusy(false); }
-  }
-
-  const activeProject = resData?.projects?.[0] || null;
-  const resources = activeProject?.resources || [];
-
-  return (
-    <>
-      <div className="row wrap" style={{ gap: 8, marginBottom: 10, alignItems: 'center' }}>
-        <span className="muted" style={{ fontSize: 12.5 }}>Proyecto:</span>
-        <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)} style={{ width: 300 }}>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.code} · {p.name}{p.productManager ? ` — PM: ${p.productManager}` : ''}</option>
-          ))}
-        </select>
-        <span className="muted" style={{ fontSize: 12 }}>Capacidad: <b>{activeProject?.spPerDay ?? 1} SP</b> por día por recurso.</span>
-        {activeProject?.project.productManager && <Badge tone="accent">PM: {activeProject.project.productManager}</Badge>}
-        {activeProject?.project.valueStream && <Badge tone="gray">{activeProject.project.valueStream}</Badge>}
-      </div>
-
-      {(!activeProject || !projects.length) && <Empty>No hay proyectos de los que calcular recursos.</Empty>}
-
-      {activeProject && (
-        <Card title={`Recursos · ${activeProject.project.code} ${activeProject.project.name}`} hint="Los Story Points asignados a cada recurso en el sprint restan días de su capacidad (1 SP = 1 día).">
-          {!resources.length && <Empty>Sin recursos registrados todavía. Usa “Agregar recurso”.</Empty>}
-          <div className="res-table">
-            <div className="tr th">
-              <span>Recurso</span>
-              <span>Registro</span>
-              <span>Sprints del proyecto</span>
-            </div>
-            {resources.map((r) => (
-              <div className="tr" key={`${r.userId}-${r.inferred ? 'i' : 'r'}`}>
-                <span className="row" style={{ gap: 8 }}>
-                  <span className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>{r.avatar || r.name.slice(0, 2)}</span>
-                  <span>
-                    <b>{r.name}</b> <span className="muted" style={{ fontSize: 11 }}>· {r.roleLabel}</span>
-                    {r.inferred && <Badge tone="warn">asignado</Badge>}
-                  </span>
-                </span>
-                <span className="mono" style={{ fontSize: 12 }}>
-                  {r.totals.capacity} puestos · {r.totals.assigned} SP asignados · <b style={r.totals.free < 0 ? { color: 'var(--danger)' } : undefined}>{Math.max(0, r.totals.free)} SP libres</b>
-                  {r.inferred && !r.id ? null : (
-                    <button className="btn ghost xs" style={{ marginLeft: 8 }} onClick={() => removeResource(r.id)}>quitar</button>
-                  )}
-                </span>
-                <span className="row wrap" style={{ gap: 4 }}>
-                  {r.availability.map((a) => (
-                    <span
-                      key={a.sprint.id}
-                      className={`cap-chip${a.over ? ' over' : ''}`}
-                      title={`${a.sprint.name} (${a.sprint.startDate} → ${a.sprint.endDate}): ${a.days} días hábiles · ${a.capacity} SP capacidad · ${a.assigned} SP asignados`}
-                    >
-                      <b>{a.sprint.name}</b> {Math.max(0, a.free)}/ {a.capacity} SP libres
-                      {a.over && ' ⚠'}
-                    </span>
-                  ))}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {activeProject && cands && (
-        <Card title="Agregar recurso disponible" hint="Candidatos del nivel equipo/ART que aún no están registrados en este proyecto, con sus SP libres según asignaciones en otros proyectos.">
-          {!cands.candidates.length && <Empty>No hay candidatos disponibles.</Empty>}
-          <div className="res-table">
-            <div className="tr th"><span>Candidato</span><span>Capacidad</span><span /></div>
-            {cands.candidates.map((c) => (
-              <div className="tr" key={c.userId}>
-                <span className="row" style={{ gap: 8 }}>
-                  <span className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>{c.name.slice(0, 2)}</span>
-                  <span><b>{c.name}</b> <span className="muted" style={{ fontSize: 11 }}>· {c.roleLabel}</span></span>
-                </span>
-                <span className="mono" style={{ fontSize: 12 }}>
-                  {c.totals.capacity} puestos · {c.totals.assigned} SP en otros proyectos · <b>{Math.max(0, c.totals.free)} SP libres</b>
-                </span>
-                <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                  {c.perSprint.map((t) => (
-                    <Badge key={t.id} tone="gray">{t.sprintName || 'backlog'}·{t.storyPoints}SP</Badge>
-                  ))}
-                  <button className="btn primary xs" disabled={busy} onClick={() => addResource(c.userId)}>+ Añadir</button>
-                </span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-    </>
-  );
-}
-
 export default function TimelineView() {
   const { user } = useAuth();
   const { data, loading, error, reload } = useApi(() => TimelineModel.get(), [user.role]);
@@ -406,7 +274,11 @@ export default function TimelineView() {
   const canDrag = DRAG_ROLES.includes(user.role);
   const order = [...(data?.tabs ? orderInner(data) : ['mine'])];
   const available = data?.tabs ? order.filter((t) => data.tabs[t]) : [];
-  const active = tab && available.includes(tab) ? tab : available[0] || null;
+  const hasData = (t) =>
+    (t === 'mine' && data?.mine?.tasks?.length) ||
+    (t === 'byPI' && (data?.byPI?.programIncrements?.length || data?.byPI?.unassigned?.length)) ||
+    (t === 'projects' && data?.projects?.projects?.length);
+  const active = tab && available.includes(tab) ? tab : available.find(hasData) || available[0] || null;
 
   async function reschedule(taskId, sprintId) {
     try {
@@ -452,7 +324,6 @@ export default function TimelineView() {
       {active === 'mine' && <MineTab data={data} canDrag={canDrag} onReschedule={reschedule} />}
       {active === 'byPI' && <ByPITab data={data} canDrag={canDrag} onReschedule={reschedule} />}
       {active === 'projects' && <ProjectsTab data={data} canDrag={canDrag} onReschedule={reschedule} />}
-      {active === 'resources' && <ResourcesTab data={data} />}
     </>
   );
 }
@@ -462,6 +333,5 @@ function orderInner(data) {
   if (data.tabs.mine) base.push('mine');
   if (data.tabs.byPI) base.push('byPI');
   if (data.tabs.projects) base.push('projects');
-  if (data.tabs.resources) base.push('resources');
   return base;
 }

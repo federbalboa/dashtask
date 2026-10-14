@@ -33,3 +33,30 @@ export function permissionScope(user) {
   const perm = PermissionModel.findByUser(user.id);
   return { any: !!perm?.canMarkAnyChecklist, projectIds: perm?.projectIds || [] };
 }
+
+/** Roles que por defecto pueden autorizar el bloqueo de una tarea. */
+export const BLOCK_APPROVER_ROLES = ['lpm', 'product_manager', 'admin'];
+
+/**
+ * ¿Puede este usuario autorizar (aprobar/rechazar) solicitudes de bloqueo?
+ * 1. Admin; 2. LPM o Product Management; 3. permiso global "aprobar bloqueos"
+ *    (otorgado por el admin, opcionalmente limitado a ciertos proyectos).
+ */
+export function canApproveBlocks(user, task = null) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (BLOCK_APPROVER_ROLES.includes(user.role)) return true;
+  const perm = PermissionModel.findByUser(user.id);
+  if (!perm?.canApproveBlocks) return false;
+  if (!perm.projectIds || !perm.projectIds.length) return true;
+  const projectId = task?.projectId || '';
+  if (!projectId) return true;
+  return perm.projectIds.some((id) => String(id) === String(projectId));
+}
+
+/** Alcance del permiso "aprobar bloqueos" (para la UI). */
+export function blockApprovalScope(user) {
+  if (user?.role === 'admin') return { any: true, projectIds: null };
+  const perm = user ? PermissionModel.findByUser(user.id) : null;
+  return { any: !!perm?.canApproveBlocks, projectIds: perm?.projectIds || [] };
+}

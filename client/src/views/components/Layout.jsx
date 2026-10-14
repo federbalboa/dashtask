@@ -13,6 +13,7 @@ const NAV = [
   { to: '/kanban', label: 'Kanban', icon: '🗂️', roles: '*' },
   { to: '/ceremonies', label: 'Ceremonias', icon: '🔁', roles: '*' },
   { to: '/changes', label: 'Control de cambios', icon: '🛂', roles: ['lpm', 'business_owner', 'epic_owner', 'rte', 'product_manager', 'product_owner', 'admin'] },
+  { to: '/blocks', label: 'Bloqueos', icon: '⛔', roles: ['lpm', 'business_owner', 'epic_owner', 'rte', 'product_manager', 'product_owner', 'system_architect', 'scrum_master', 'team_lead', 'tech_lead', 'developer', 'admin'] },
   { to: '/people', label: 'Equipo & Roles', icon: '👥', roles: '*' },
   { to: '/glosario', label: 'Glosario', icon: '📖', roles: '*' },
   { to: '/admin', label: 'Permisos (Admin)', icon: '🛡️', roles: ['admin'] },

@@ -14,18 +14,7 @@ const TRIAGE_ROLES = ['intake_manager', 'product_manager', 'product_owner', 'lpm
 const REVIEW_ROLES = ['product_manager', 'product_owner', 'rte', 'system_architect', 'business_owner', 'scrum_master']
   .map((id) => getRole(id));
 
-const CHECK_LABELS = {
-  title: 'Título',
-  description: 'Descripción',
-  type: 'Tipo',
-  requester: 'Solicitante',
-  businessValue: 'Valor de negocio',
-  acceptanceCriteria: 'Criterios de aceptación',
-  estimate: 'Estimación',
-  dependencies: 'Dependencias',
-  nfr: 'Requisitos no funcionales',
-  attachments: 'Adjuntos',
-};
+const REQ_ROLES = ['intake_manager', 'product_owner', 'product_manager', 'business_owner', 'system_architect', 'rte'];
 
 export default function IntakesView() {
   const { user } = useAuth();
@@ -150,7 +139,7 @@ export default function IntakesView() {
           intake={selected}
           canTriage={canTriage}
           onClose={() => setSelected(null)}
-          onChanged={() => { setSelected(null); reload(); }}
+          onUpdated={(next) => { setSelected(next); reload(); }}
         />
       )}
     </>
@@ -277,7 +266,7 @@ function CreateIntakeModal({ onClose, onSaved }) {
 
 /* ---------- Modal de detalle + triage ---------- */
 
-function IntakeDetailModal({ intake, canTriage, onClose, onChanged }) {
+function IntakeDetailModal({ intake, canTriage, onClose, onUpdated }) {
   const toast = useToast();
   const { user } = useAuth();
   const [reason, setReason] = useState('');
@@ -289,12 +278,19 @@ function IntakeDetailModal({ intake, canTriage, onClose, onChanged }) {
   const [ePoints, setEPoints] = useState('');
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
 
+  const refreshIntake = async () => {
+    try {
+      const { intake: fresh } = await IntakeModel.get(intake.id);
+      onUpdated(fresh);
+    } catch { /* ignore */ }
+  };
+
   const act = async (action, extra = {}) => {
     setBusy(true);
     try {
-      await IntakeModel.triage(intake.id, { action, reason, priority, ...extra });
+      const res = await IntakeModel.triage(intake.id, { action, reason, priority, ...extra });
       toast.success(`Acción "${action}" aplicada a ${intake.id}.`);
-      onChanged();
+      onUpdated(res.intake);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -305,10 +301,10 @@ function IntakeDetailModal({ intake, canTriage, onClose, onChanged }) {
   const addPerspective = async () => {
     setBusy(true);
     try {
-      await IntakeModel.perspective(intake.id, { role: pRole, comment: pComment });
+      const res = await IntakeModel.perspective(intake.id, { role: pRole, comment: pComment });
       toast.success('Perspectiva registrada en la revisión conjunta.');
       setPComment('');
-      onChanged();
+      onUpdated(res.intake);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -321,10 +317,10 @@ function IntakeDetailModal({ intake, canTriage, onClose, onChanged }) {
     if (!eRole || Number.isNaN(pts) || pts < 0) return;
     setBusy(true);
     try {
-      await IntakeModel.estimate(intake.id, { role: eRole, points: pts });
+      const res = await IntakeModel.estimate(intake.id, { role: eRole, points: pts });
       toast.success(`Estimación registrada (${pts} SP).`);
       setEPoints('');
-      onChanged();
+      onUpdated(res.intake);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -360,18 +356,14 @@ function IntakeDetailModal({ intake, canTriage, onClose, onChanged }) {
           </div>
           <Bar value={c.percent} tone={c.percent === 100 ? 'ok' : 'warn'} />
 
-          <div className="section-title">Requisitos de información</div>
-          <div className="checklist">
-            {Object.entries(CHECK_LABELS).map(([key, label]) => {
-              const done = intake.checklist[key];
-              return (
-                <div key={key} className={`check-item ${done ? 'done' : 'miss'}`}>
-                  <span className="mark">{done ? '✔' : '⚠'}</span>
-                  <span>{label}</span>
-                </div>
-              );
-            })}
+          <div className="section-title">
+            Requisitos de información por rol
           </div>
+          <div className="muted-2" style={{ fontSize: 12, marginBottom: 10 }}>
+            Prerrequisito del intake: cada rol coloca la información que le toca. Con el 100% completo se
+            autoriza y pasa al <strong>Grooming / Backlog Review</strong> para el desglose de tareas.
+          </div>
+          <RequirementsEditor intake={intake} onChange={onUpdated} />
 
           <div className="section-title">Detalle</div>
           <dl className="kv">
@@ -515,9 +507,175 @@ function IntakeDetailModal({ intake, canTriage, onClose, onChanged }) {
           kind="intake"
           item={{ id: intake.id, currentDate: intake.dueDate }}
           onClose={() => setRescheduleOpen(false)}
-          onChanged={onChanged}
+          onChanged={refreshIntake}
         />
       )}
     </div>
+  );
+}
+
+/* ---------- Editor de requisitos de información por rol ---------- */
+
+function RequirementsEditor({ intake, onChange }) {
+  const toast = useToast();
+  const [drafts, setDrafts] = useState({});
+  const [busyKey, setBusyKey] = useState(null);
+  const [newLabel, setNewLabel] = useState('');
+  const [newRole, setNewRole] = useState('product_owner');
+  const [adding, setBusyAdd] = useState(false);
+
+  const requirements = intake.requirements || [];
+  const byRole = useMemo(() => {
+    const map = {};
+    requirements.forEach((r) => {
+      (map[r.role] = map[r.role] || []).push(r);
+    });
+    return map;
+  }, [requirements]);
+  const orderedRoles = [
+    ...REQ_ROLES.filter((r) => byRole[r]?.length),
+    ...Object.keys(byRole).filter((r) => !REQ_ROLES.includes(r)),
+  ];
+
+  const save = async (item, done) => {
+    setBusyKey(item.key);
+    try {
+      const res = await IntakeModel.setRequirement(intake.id, item.key, {
+        value: drafts[item.key] !== undefined ? drafts[item.key] : item.value,
+        done,
+      });
+      onChange(res.intake);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const changeRole = async (key, role) => {
+    setBusyKey(key);
+    try {
+      const res = await IntakeModel.updateRequirement(intake.id, key, { role });
+      onChange(res.intake);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const removeReq = async (key) => {
+    setBusyKey(key);
+    try {
+      const res = await IntakeModel.removeRequirement(intake.id, key);
+      onChange(res.intake);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const addReq = async () => {
+    if (!newLabel.trim()) return;
+    try {
+      const res = await IntakeModel.addRequirement(intake.id, { label: newLabel.trim(), role: newRole });
+      setNewLabel('');
+      onChange(res.intake);
+      toast.success('Requisito agregado.');
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  return (
+    <>
+      <div className="row wrap" style={{ gap: 6, marginBottom: 12 }}>
+        <span className="muted-2" style={{ fontSize: 12 }}>A quién le falta:</span>
+        {intake.pendingByRole?.length
+          ? intake.pendingByRole.map((p) => (
+              <Badge key={p.role} tone="warn">{getRole(p.role)?.short || p.role} · {p.count}</Badge>
+            ))
+          : <Badge tone="ok">Todos los requisitos colocados</Badge>}
+      </div>
+
+      <div className="stack" style={{ gap: 14 }}>
+        {orderedRoles.map((role) => (
+          <div key={role} className="req-group">
+            <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
+              <RoleBadge role={role} />
+              <span className="muted-2" style={{ fontSize: 11.5 }}>
+                {(byRole[role] || []).filter((r) => !r.done).length} pendiente(s) de {(byRole[role] || []).length}
+              </span>
+            </div>
+            <div className="stack" style={{ gap: 8 }}>
+              {(byRole[role] || []).map((item) => (
+                <div key={item.key} className={`req-item ${item.done ? 'done' : 'miss'}`}>
+                  <div className="req-item-main">
+                    <span className="mark">{item.done ? '✔' : '⚠'}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="req-label">{item.label}</div>
+                      <div className="req-value">{item.value || <span className="muted-2">Sin información</span>}</div>
+                      {item.done && item.doneBy && (
+                        <div className="muted-2" style={{ fontSize: 11 }}>por {item.doneBy}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="req-actions">
+                    {item.canEdit ? (
+                      <>
+                        <input
+                          className="input"
+                          style={{ minWidth: 200 }}
+                          placeholder="Escribe la información…"
+                          value={drafts[item.key] !== undefined ? drafts[item.key] : item.value}
+                          onChange={(e) => setDrafts((d) => ({ ...d, [item.key]: e.target.value }))}
+                        />
+                        {item.done
+                          ? <button className="btn ghost xs" disabled={busyKey === item.key} onClick={() => save(item, false)}>Reabrir</button>
+                          : <button className="btn primary xs" disabled={busyKey === item.key} onClick={() => save(item, true)}>✔ Colocar</button>}
+                      </>
+                    ) : (
+                      <span className="muted-2" style={{ fontSize: 11.5 }}>{item.done ? 'colocado' : 'pendiente (otro rol)'}</span>
+                    )}
+                    {intake.canManageRequirements && (
+                      <>
+                        <select
+                          className="mini"
+                          value={item.role}
+                          disabled={busyKey === item.key}
+                          onChange={(e) => changeRole(item.key, e.target.value)}
+                        >
+                          {REQ_ROLES.map((r) => <option key={r} value={r}>{getRole(r)?.short || r}</option>)}
+                        </select>
+                        <button className="btn ghost xs" disabled={busyKey === item.key} title="Quitar requisito" onClick={() => removeReq(item.key)}>✕</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {intake.canManageRequirements && (
+        <>
+          <div className="section-title" style={{ marginTop: 16 }}>Agregar requisito (Product Management)</div>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <input
+              className="input grow"
+              placeholder="Ej. Presupuesto, Restricciones legales, Impacto en otros equipos…"
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+            />
+            <select className="mini" value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+              {REQ_ROLES.map((r) => <option key={r} value={r}>{getRole(r)?.short || r}</option>)}
+            </select>
+            <button className="btn primary sm" disabled={!newLabel.trim()} onClick={addReq}>+ Agregar</button>
+          </div>
+        </>
+      )}
+    </>
   );
 }

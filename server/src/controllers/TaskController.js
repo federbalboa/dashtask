@@ -2,10 +2,13 @@ import { TaskModel, KANBAN_COLUMNS, nextStage, stageIndex, STAGE_IDS } from '../
 import { UserModel } from '../models/UserModel.js';
 import { SprintModel } from '../models/SprintModel.js';
 import { ChangeModel } from '../models/ChangeModel.js';
+import { BlockModel } from '../models/BlockModel.js';
 import { RescheduleService } from '../services/RescheduleService.js';
+import { BlockService } from '../services/BlockService.js';
 import { taskContext } from '../services/HierarchyService.js';
 import { stageMeta } from '../config/taskFlow.js';
-import { canEditChecklistItem } from '../services/PermissionService.js';
+import { ROLES } from '../config/roles.js';
+import { canEditChecklistItem, canApproveBlocks } from '../services/PermissionService.js';
 
 /** CONTROLADOR: Tasks / Kanban */
 export const TaskController = {
@@ -33,6 +36,9 @@ export const TaskController = {
     }));
     // Historial de cambios de entrega (incidencias aplicadas y control de cambios).
     ctx.changes = ChangeModel.findByRef('task', ctx.task.id);
+    // Solicitudes de bloqueo (pendientes y resueltas) y si este usuario puede decidirlas.
+    ctx.blocks = BlockModel.findByTask(ctx.task.id).slice().reverse();
+    ctx.canApproveBlocks = canApproveBlocks(req.user, ctx.task);
     return res.json(ctx);
   },
 
@@ -79,6 +85,69 @@ export const TaskController = {
   },
 
   /**
+   * Edición detallada de la tarea: título, descripción, criterios de aceptación y
+   * checklist (permite agregar/quitar puntos y "más iteraciones" por etapa).
+   * Cada cambio relevante se registra en la bitácora (qué, quién y cuándo).
+   */
+  editDetails: (req, res) => {
+    const task = TaskModel.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Tarea no encontrada.' });
+
+    const body = req.body || {};
+    const patch = {};
+    const entries = [];
+
+    if (body.title !== undefined) {
+      const title = String(body.title).trim();
+      if (!title) return res.status(400).json({ error: 'El título no puede quedar vacío.' });
+      if (title !== task.title) {
+        patch.title = title;
+        entries.push({
+          type: 'edit', action: 'field', key: 'title', from: task.title, to: title,
+          note: `Título: “${task.title}” → “${title}”`,
+        });
+      }
+    }
+
+    if (body.description !== undefined) {
+      const description = String(body.description || '');
+      if (description !== (task.description || '')) {
+        patch.description = description;
+        entries.push({ type: 'edit', action: 'field', key: 'description', note: 'Descripción de la tarea modificada' });
+      }
+    }
+
+    if (body.ac !== undefined) {
+      const ac = sanitizeList(body.ac);
+      const before = task.ac || [];
+      if (JSON.stringify(ac) !== JSON.stringify(before)) {
+        patch.ac = ac;
+        entries.push({ type: 'edit', action: 'ac', note: `Criterios de aceptación: ${before.length} → ${ac.length} criterio(s)` });
+      }
+    }
+
+    if (body.checklist !== undefined) {
+      const parsed = sanitizeChecklist(body.checklist, task.checklist || []);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      if (JSON.stringify(parsed.items) !== JSON.stringify(task.checklist || [])) {
+        patch.checklist = parsed.items;
+        entries.push({
+          type: 'edit', action: 'checklist',
+          note: `Checklist: +${parsed.added} / -${parsed.removed} punto(s) (total ${parsed.items.length})`,
+        });
+      }
+    }
+
+    if (!entries.length) {
+      return res.json({ task, changed: false });
+    }
+
+    TaskModel.update(task.id, patch);
+    entries.forEach((e) => TaskModel.audit(task.id, { ...e, actor: req.user.name, role: req.user.role }));
+    return res.json({ task: TaskModel.findById(task.id), changed: true, entries: entries.length });
+  },
+
+  /**
    * Reprograma la fecha de entrega identificando el motivo:
    *  - Incidencia u omisión → se aplica de inmediato y queda registrada.
    *  - Control de cambios → genera una solicitud que autoriza el equipo de portafolio.
@@ -118,7 +187,22 @@ export const TaskController = {
     const current = TaskModel.findById(req.params.id);
     if (!current) return res.status(404).json({ error: 'Tarea no encontrada.' });
 
-    // Gate: para avanzar de etapa la etapa actual debe estar 100% completa.
+    // Bloquear requiere autorización: LPM, Product Management, Admin o permiso
+    // global "aprobar bloqueos". Quien no lo tenga levanta una solicitud pendiente.
+    if (status === 'blocked' && current.status !== 'blocked' && !canApproveBlocks(req.user, current)) {
+      try {
+        const { block, applied } = BlockService.request(req.user, current, blockedReason);
+        return res.status(202).json({
+          pending: !applied,
+          block,
+          task: TaskModel.findById(current.id),
+          message: 'Solicitud de bloqueo enviada. LPM, Product Management o el Admin deben autorizarla.',
+        });
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
+      }
+    }
+
     const from = current.status;
     const isForward =
       STAGE_IDS.includes(from) && STAGE_IDS.includes(status) && stageIndex(status) > stageIndex(from);
@@ -285,3 +369,46 @@ export const TaskController = {
     return res.status(204).end();
   },
 };
+
+/* ---------------- Utilidades de edición de la tarea ---------------- */
+
+function sanitizeList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((x) => String(x || '').trim()).filter(Boolean);
+}
+
+let customSeq = 0;
+
+/**
+ * Normaliza y valida el checklist editable. Conserva el estado (done/nota) de los
+ * puntos existentes y permite agregar puntos nuevos (las "iteraciones" por etapa).
+ */
+function sanitizeChecklist(value, current) {
+  if (!Array.isArray(value)) return { error: 'Checklist inválido.' };
+  const byKey = new Map((current || []).map((i) => [i.key, i]));
+  const seen = new Set();
+  const items = [];
+  for (const raw of value) {
+    const stage = String(raw?.stage || '').trim();
+    const label = String(raw?.label || '').trim();
+    const role = String(raw?.role || '').trim();
+    if (!STAGE_IDS.includes(stage)) return { error: `Etapa de checklist no válida: ${stage}` };
+    if (!label) return { error: 'Cada punto del checklist necesita un texto.' };
+    if (!ROLES[role]) return { error: `Rol no válido para el punto del checklist: ${role}` };
+    const key = String(raw?.key || '').trim();
+    if (key && byKey.has(key)) {
+      const prev = byKey.get(key);
+      items.push({ ...prev, stage, label, role });
+      seen.add(key);
+    } else {
+      customSeq += 1;
+      const nk = `custom-${stage}-${Date.now().toString(36)}-${customSeq}`;
+      items.push({ key: nk, stage, label, role, done: false, doneBy: '', doneAt: '', note: '', attachment: '' });
+      seen.add(nk);
+    }
+  }
+  const before = current || [];
+  const added = items.filter((i) => !byKey.has(i.key)).length;
+  const removed = before.filter((i) => !seen.has(i.key)).length;
+  return { items, added, removed };
+}

@@ -72,11 +72,56 @@ function maxDate(a, b) {
   return toDate(a).getTime() >= toDate(b).getTime() ? a : b;
 }
 
+/** Alcance de "Mi línea de tiempo" según el rol: por responsabilidad, no sólo tareas asignadas. */
+export function mineScope(user) {
+  switch (user.role) {
+    case 'product_manager': {
+      const projectIds = new Set(ProjectModel.all()
+        .filter((p) => String(p.productManagerId) === String(user.id) || (!p.productManagerId && p.productManager === user.name))
+        .map((p) => p.id));
+      return { label: 'de tus proyectos (Product Management)', projectIds };
+    }
+    case 'business_owner': {
+      const projectIds = new Set(ProjectModel.all()
+        .filter((p) => p.owner === user.name || String(p.ownerId) === String(user.id))
+        .map((p) => p.id));
+      return { label: 'de tus proyectos (Business Owner)', projectIds };
+    }
+    case 'epic_owner': {
+      const epicIds = new Set(EpicModel.all()
+        .filter((e) => e.owner === user.name || String(e.ownerId) === String(user.id))
+        .map((e) => e.id));
+      return { label: 'de tus épicas (Epic Owner)', epicIds };
+    }
+    case 'rte':
+    case 'system_architect':
+    case 'lpm':
+    case 'admin':
+      return { label: 'de todo el ART / portafolio', all: true };
+    default:
+      return null;
+  }
+}
+
 export const TimelineService = {
-  /** Vista "Mi línea de tiempo": tareas asignadas al usuario + kanban personal. */
+  /** Vista "Mi línea de tiempo": tareas asignadas al usuario + las que le corresponden por rol. */
   mine(user) {
     const ctx = this._ctx();
-    const myTasks = TaskModel.findByAssignee(user.id).map((t) => decorateTask(t, ctx));
+    const all = TaskModel.all();
+    const assigned = TaskModel.findByAssignee(user.id);
+    const scope = mineScope(user);
+
+    let scoped = [];
+    if (scope) {
+      if (scope.all) scoped = all;
+      else if (scope.projectIds) scoped = all.filter((t) => t.projectId && scope.projectIds.has(t.projectId));
+      else if (scope.epicIds) scoped = all.filter((t) => t.epicId && scope.epicIds.has(t.epicId));
+    }
+
+    const byId = new Map();
+    [...scoped, ...assigned].forEach((t) => byId.set(t.id, t));
+    const myTasks = [...byId.values()].map((t) => decorateTask(t, ctx));
+
     const columns = KANBAN_COLUMNS.map((c) => ({
       ...c,
       count: myTasks.filter((t) => t.status === c.id).length,
@@ -85,7 +130,9 @@ export const TimelineService = {
     const done = columns.find((c) => c.id === 'release')?.count || 0;
     return {
       user: { id: user.id, name: user.name, role: user.role },
-      tasks: myTasks.sort((a, b) => diffDays(a.span.start, b.span.start) - diffDays(a.span.start, b.span.start)),
+      scopeLabel: scope?.label || 'asignadas a ti',
+      assignedCount: assigned.length,
+      tasks: myTasks.sort((a, b) => a.span.start.localeCompare(b.span.start)),
       kanban: columns,
       totals: { tasks: myTasks.length, done, donePct: myTasks.length ? Math.round((done / myTasks.length) * 100) : 0 },
     };

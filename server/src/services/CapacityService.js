@@ -1,17 +1,37 @@
 /**
  * SERVICE: Capacidad de los recursos por sprint.
- * Basado en "1 Story Point por día" (configurable por proyecto con
- * `sprintConfig.spPerDay`). La capacidad de un sprint = días × SP/día.
+ * Basado en "1 Story Point por día hábil" (configurable por proyecto con
+ * `sprintConfig.spPerDay`). La capacidad de UNA persona en un sprint =
+ * días hábiles (Lun–Vie) × SP/día. La capacidad del sprint = personas × esa cifra.
  * El SP asignado consume días del desarrollador en ese sprint.
  */
 import { TaskModel } from '../models/TaskModel.js';
-import { diffDays } from '../utils/dates.js';
 
 export const SP_PER_DAY_DEFAULT = 1;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Días hábiles (lunes a viernes) entre dos fechas ISO.
+ * Se cuenta el día de inicio y NO el de cierre: así un sprint "de miércoles a
+ * miércoles" a 2 semanas (14 días) rinde 10 días hábiles.
+ */
+export function businessDays(start, end) {
+  if (!start || !end) return 0;
+  let cur = new Date(`${start}T00:00:00Z`);
+  const last = new Date(`${end}T00:00:00Z`);
+  let n = 0;
+  while (cur < last) {
+    const wd = cur.getUTCDay();
+    if (wd >= 1 && wd <= 5) n += 1;
+    cur = new Date(cur.getTime() + DAY_MS);
+  }
+  return n;
+}
+
 export function sprintDays(sprint) {
   if (!sprint || !sprint.startDate || !sprint.endDate) return 0;
-  return Math.max(1, diffDays(sprint.startDate, sprint.endDate) + 1);
+  return businessDays(sprint.startDate, sprint.endDate);
 }
 
 export function spPerDayFor(project) {
